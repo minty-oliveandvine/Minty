@@ -1,12 +1,11 @@
-from flask import flash, redirect, render_template, request, url_for
+from flask import flash, redirect, request, url_for
 from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.auth.services.hub_login import hub_login_url
 from blueprints.invitation import invitation_bp
 from blueprints.invitation.models.invitation import Invitation
-from blueprints.shared.entity_display import build_entity_acronym
-from models.db import Entity, db
+from models.db import db
 
 
 @invitation_bp.route("/invitation/accept/<string:token>", methods=["GET"])
@@ -110,18 +109,6 @@ def accept_invitation_page(token):
 @invitation_bp.route("/entity/<entity:entity_id>/xero-not-connected", methods=["GET"])
 @login_required
 def xero_not_connected(entity_id):
-    """Page shown when user is added to Minty but not invited to Xero org."""
-    entity = Entity.query.get(entity_id)
-    if not entity:
-        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
-        return redirect(url_for("entity.entity_list"))
-
-    entity_name = entity.name or "Unknown"
-    entity_acronym = build_entity_acronym(entity_name)
-
-    return render_template(
-        "invitation/xero_not_connected.html",
-        entity_name=entity_name,
-        entity_acronym=entity_acronym,
-        entity_id=entity_id,
-    )
+    """Added to Minty but not to the company's Xero org: the Entity & Integration tab (minty-web's,
+    through ``entity.entity_settings``) is where that is put right. Flask's page went 2026-10-20."""
+    return redirect(url_for("entity.entity_settings", entity_id=entity_id))

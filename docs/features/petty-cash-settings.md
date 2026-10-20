@@ -1,74 +1,20 @@
 # Petty-cash settings — currency, denominations, sales methods, the Xero mapping
 
-What a company configures before its first report: on **Petty Cash Settings**
-(`/entity/<co>/settings/petty-cash`, `entity_settings_entity` in
-`blueprints/entity/routes/settings.py`, template `templates/entity/settings_entity.html`) and
-during onboarding Steps 5–7 (the wizard writes the same rows through `/api/onboarding/*`).
+What a company configures before its first report. **The screen is minty-petty-cash-web's
+Petty Cash Settings** (`/entity/<shortid>/<name>/settings/petty-cash`; its `docs/features/`), over
+minty-petty-cash-api; onboarding Steps 5–7 write the same rows through `/api/onboarding/*`.
+Flask's Jinja page and its form POST were deleted on 2026-10-20; its address
+`GET /entity/<co>/settings/petty-cash` (`entity_settings_entity` in
+`blueprints/entity/routes/settings.py`: `COA_VIEW`, Petty Cash on) stays and hands over through
+`/handoff/petty-cash-web`. Flask's bearer copy of the API serves the same screen's calls
+(`GET /settings`, `PUT /settings/country`, the `/sales-methods` routes, `GET /settings/xero`,
+`PUT /settings/xero/mapping`, `PUT /settings/xero/account-codes`; [petty-cash-api.md](petty-cash-api.md)),
+and minty-petty-cash-api forwards the three Xero cards to `POST /api/internal/xero/petty-cash-settings`.
 Models: `blueprints/entity/models/` (`currency_info`, `cash_info`, `entity_cash_setting`,
 `entity_cash_detail`, `sale_info`, `entity_sale_setting`, `entity_pettycash_settings`,
 `country_info`); services: `blueprints/entity/services/payment_methods.py`,
+`blueprints/entity/services/xero_mapping.py`, `blueprints/entity/services/xero_account_mapping_post.py`,
 `blueprints/report/services/cash_denominations.py`, `blueprints/xero/services/settings.py`.
-
-## The page
-
-The one Flask settings page that stays (the user, 2026-09-30: app settings stay in their own
-app; Users, Entity & Integration and the Module tab are minty-web's - since phase 2,
-2026-10-05, for the first two). Since 2026-10-01 it is ONE template for every visit, built from the old
-`?from=bills` page; the classic page and `settings_entity_bills_ui.html` are gone.
-
-- **Chrome** = minty-web's Module page (`AppHeader` + `SettingsTabs`), which minty-payment-request-web's
-  Payment Request Settings wears too: the way back, "Settings", the company, the initials (My Profile)
-  and the ≡ (the menu), then the sticky pills Users · Entity & Integration · **Petty Cash
-  Settings** · Payment Request Settings (when the payments module is on) · Modules - the Users, Entity &
-  Integration and Module pills go through Flask's addresses, which hand over to minty-web.
-- **Content** = Payment Request Settings' card (`AccountCodeSettings.tsx`), one per section, each
-  collapsible: Country & currency · Xero account mapping · Electronic · Delivery · Petty Cash
-  Account Code. One full-width **Save Changes** saves them all.
-- **"‹ Back"** returns to the page the person came from, whichever app
-  (`static/js/back_link.js`; its `href`, `company_home_url`, is the dashboard - or the payments
-  app when Petty Cash is off - for a new tab). The `?from=bills` flag, which used to pick
-  "‹ Payments" or "‹ Reports", the tabs' links and the sidebar's Settings, went on 2026-10-05; an
-  old link that still carries it opens the same page.
-- **Look**: plain CSS in `static/css/settings_page.css` under `#pc-settings`, with Tailwind v4's
-  values written out (the page loads Tailwind v3 from a CDN only for the view-only notice and the
-  classes the mapping script toggles; the shared toast styles itself).
-- **Scripts**: `static/js/petty_cash_settings.js` runs the page (cards, pickers, account codes,
-  sales methods, the save, the leave guard); the Xero mapping pickers are
-  `templates/entity/partials/xero_mapping_classic_script_fragment.html`. The page's data reaches
-  the script as JSON (`#pcs-config`) and is drawn as text.
-- **Dialogs**: minty-web's design ([modals.md](modals.md)): "Leave without saving?" guards the
-  page once it has loaded, and deleting a sales method asks first.
-- **Without a live Xero connection** (2026-10-06; `_xero_live` in the route: no
-  `xero_org_id` - never connected, or disconnected inside Minty, which nulls it - or a token that
-  doesn't resolve, or Xero's `/connections` says revoked): the two Xero-fed cards, **Xero account
-  mapping** and **Petty Cash Account Code**, keep their heading and show only "Xero isn't
-  connected. Connect it in Entity & Integration to set these up." - no lists, no "+ New Contact",
-  and the mapping script (its `/xero-data` load and its check) is not on the page. Country &
-  currency and the sales methods stay. The save then writes only those: the account-code rule,
-  the mapping and the ticks are skipped, so the cached codes are neither refused over nor
-  switched off. Not a toast.
-
-### The save, in order
-
-1. The mapping check (`validateMappingBeforeSave`): once any mapping field is set, all nine must
-   be.
-2. **At least one account code** (below) — before anything is written.
-3. The pending sales-method changes, each through its own API call (deletions, additions,
-   renames, then the order). **Any that fails stops the save** and the toast names it ("I
-   couldn't rename "Visa": This method is shared with other companies…"); nothing else is
-   posted, and what did go through is remembered so the next Save redoes only the rest.
-4. The form `POST /entity/<co>/settings/petty-cash`: country and currency, the mapping, and the
-   ticked codes.
-
-Without a live Xero connection steps 1 and 2 are skipped and the POST carries no mapping or ticks.
-
-Save stays off until the Xero lists have loaded (when connected), while no account code is ticked, and while
-nothing has changed (2026-10-05): the page measures its changes the way "Leave without saving?"
-does (`isDirty` - the form's fields, the ticks and the sales methods against what it loaded), so
-an edit put back by hand turns Save off again. The mapping pickers write their hidden `<select>`s
-from script, which fires no event, so any click, key or blur on the page re-checks Save. An Enter
-in a text box no longer submits the page (the boxes' own Enter still works: add a method, pick
-a suggestion, finish a rename).
 
 ## Country and currency
 
@@ -76,22 +22,10 @@ a suggestion, finish a rename).
 code, symbol, decimal places). **Every money figure a company sees is formatted in its
 currency** — never the report's stored code and never a default — so the registries must
 exist before a company is created (the onboarding wizard's Step 1 reads them from
-`/api/onboarding/countries` and `/currencies`). Changing the country is
-`POST /entity/<co>/settings/petty-cash` (`ENTITY_UPDATE`).
-
-**For minty-petty-cash-web** (2026-10-16) the Petty Cash API serves the two cards that need no
-Xero - Country & currency and the Electronic / Delivery sales methods - over the same services:
-`GET /settings`, `PUT /settings/country`, `POST`/`PUT`/`DELETE /sales-methods...`
-(`docs/features/petty-cash-api.md`). The Xero mapping and the account codes stay on this page for
-now - since the owner's go-ahead (2026-10-16) the API serves the Xero cards too
-(`GET /settings/xero`, `PUT /settings/xero/mapping`, `PUT /settings/xero/account-codes`) through
-`entity/services/xero_mapping.py`, which this page now shares: the live connection check, the refresh
-from Xero on opening, the code list and its at-least-one rule. **Fixed with it, here too:** a mapping
-choice the lists do not offer is refused ("Choose the … from the list.") - an id the page never
-offered used to be saved as an "Unknown Account" / "Unknown Contact" row made up on the spot
-(`tests/test_xero_mapping_state.py`). The API refuses an unknown country or currency (this page's form skips it), through
-`country_currency.checked_country_currency`, which minty-web's Entities & Integration save now
-shares.
+`/api/onboarding/countries` and `/currencies`). A change is
+`apply_country_currency_selection` (`ENTITY_UPDATE` and `COA_UPDATE/CREATE/DELETE`), checked by
+`country_currency.checked_country_currency` (an unknown country or currency is refused), which
+minty-web's Entity & Integration save shares.
 
 ## Denominations (the cash count)
 
@@ -100,8 +34,8 @@ a note and a coin of the same face value cannot both exist (HKD's $10 is a note)
 it on type too and made `type` NOT NULL on 2026-10-13; that was withdrawn on 2026-10-14
 (`migrations/c5a05_down.sql`).
 `entity_cash_setting` holds
-the company's own list: setting a currency (creation, the onboarding wizard, this page, the
-hub's Entities & Integration save) writes one row per active denomination of it and drops
+the company's own list: setting a currency (creation, the onboarding wizard, Petty Cash
+Settings, the hub's Entities & Integration save) writes one row per active denomination of it and drops
 any other currency's rows, keeping rows already there so the company's on/off and order
 survive a re-save (`entity/services/cash_settings.py`; minty-onboarding-api has the same
 rule). A denomination with no row — every one for a company created before 2026-10-12, or one
@@ -112,12 +46,12 @@ are made and rebuilt only by `refresh_cash_stock` (`report/services/cash_denomin
 on submit, revert to draft, delete and a submitted report's cash-count edit - one per active
 denomination of the current currency, other currencies' rows removed, 0 where not counted.
 Onboarding never writes it; a draft never moves it.
-`resolve_denominations_for_entity` in `cash_denominations.py` is the one resolver; the
-cash-count page's calculator and the `.docx` export's `qty*` placeholders read from it.
+`resolve_denominations_for_entity` in `cash_denominations.py` is the one resolver; the cash
+count reads from it.
 
 ## Sales methods
 
-The Sales page shows cash, the **electronic** methods and the **delivery** platforms the
+The Sales stage shows cash, the **electronic** methods and the **delivery** platforms the
 company chose (`SaleType`: `electronic` / `delivery` / `other`). `sale_info` is the shared
 catalogue (Visa, Alipay, Foodpanda, …), `entity_sale_setting` the company's selection with
 its order:
@@ -129,11 +63,9 @@ its order:
 - `replace_sales_methods(user_id, entity_id, electronic, delivery)` reconciles the whole
   set to two name lists (what the wizard's Step 5 and the seed use).
 
-On the page, every change is pending until Save. "Add New Method" opens the catalogue picker: a
-method another company already uses is picked from the list (the page posts the catalogue's own
-`value_name`, which the API matches first, so "Viza" never mints a second row); "+ Other" types
-a new one. A rename of a method other companies share is refused by the API (409) — and now
-says so. Rows: rename by clicking the name; Move up, Move down and Delete under the ⋮.
+The bearer API's `/sales-methods` routes do the same for minty-petty-cash-web: a catalogue
+method is added by its id, so "Viza" never mints a second row, and a rename of a method other
+companies share is refused (409).
 
 `SALES_METHOD_*` permissions: accountant and up. A method with sales already recorded
 against it stays in the report history (the report row keeps its own name/amount).
@@ -141,28 +73,30 @@ against it stays in the report history (the report row keeps its own name/amount
 ## The Xero mapping (accounts and contacts)
 
 The six accounts and three contacts a publish posts to, chosen from the synced chart and
-contacts — [xero-integration.md](xero-integration.md) §3. A company can also create a new
-Xero contact from Minty (`POST /entity/contact/create`, `POST /report/expense/create_contact`).
-The pickers draw Xero's names as text.
+contacts — [xero-integration.md](xero-integration.md) §3, read and saved through
+`entity/services/xero_mapping.py`: the connection is checked live (Xero's `/connections`) and the
+lists refreshed from Xero when it is. A mapping choice the lists do not offer is refused ("Choose
+the … from the list.") - an unoffered id used to be saved as a made-up "Unknown Account" /
+"Unknown Contact" row (`tests/test_xero_mapping_state.py`). Without a live connection the mapping
+and the account codes are not offered (409). A new Xero contact is the bearer API's
+`POST /suppliers` (`entity/services/suppliers.py`).
 
 ## Account codes for the expense picker
 
-`entity_account_xero.is_active` decides which synced expense accounts the Expenses page
+`entity_account_xero.is_active` decides which synced expense accounts the Expenses stage
 offers (`COA_*` permissions to change); the bill module's own list is
 `entity_bill_account_xero` (minty-payment-request-api's, synced by Minty). The tick is stored there ONLY:
 since 2026-10-01 a save (and onboarding Step 5, `sync_entity_account_xero_active`) never writes
 `account_info.status`, which is Xero's own "still active". Before, a save marked unticked codes
 and every liability account INACTIVE, so with Xero disconnected the Discrepancy and Director
-fields lost their saved choice and the save said "Please select: Discrepancy account code"
-(see `docs/features/xero-integration.md` §3). A save no longer calls Xero at all.
+fields lost their saved choice (see `docs/features/xero-integration.md` §3).
 
 **At least one stays ticked** (2026-10-01): a save that ticks none would switch every code off,
-and a petty cash expense can only use the codes ticked here. The page greys Save and says why
-beside it ("Pick at least one account code." - said once; the route's refusal uses the same
-words); the route refuses it too, before anything is written
-(`saveable_account_codes` in `blueprints/entity/services/settings.py`: the page's own list,
-rows WITH a code — a row without one can never be ticked back on, so it never counts and is not
-offered). A company with no codes saves as before. Onboarding's Step 5 has the same rule since
+and a petty cash expense can only use the codes ticked here. The save is refused ("Pick at least
+one account code.", 422) before anything is written (`xero_mapping.save_account_codes`, over
+`saveable_account_codes` in `blueprints/entity/services/settings.py`: rows WITH a code — a row
+without one can never be ticked back on, so it never counts and is not offered). A company with
+no codes saves as before. Onboarding's Step 5 has the same rule since
 2026-10-01 (`save_account_codes` answers 400; it asks `listed_only=False`, because its codes
 have no `entity_account_xero` row yet), and Payment Request Settings keeps at least one bill code
 (minty-payment-request-api's PUT answers 409). Onboarding's Step 8 (the Payment Request codes) has it too:
@@ -177,23 +111,13 @@ to minty-payment-request-api, the agreed shape is: Xero connect (Step 3, Flask) 
 `entity_bill_account_xero`, so minty-payment-request-api only ever reads its own table, and Flask's route
 plus the pass-through are deleted.
 
-**The first-ever save** (no `entity_pettycash_settings` row yet) used to switch every code on
-and leave for the dashboard before the ticks were saved. Now the mapping service hands back to
-the page (`defer_success_redirect`), the ticks and country/currency are saved, and THEN the
-first save opens the dashboard (`?success=true`) as before.
-
-The ticks are posted from the page's own set by a `formdata` listener (sorted, never blank),
-not by the boxes — so a search that hides a ticked row, an Enter, or a Save before the list is
-drawn cannot drop one. (Before this, each of those switched codes off.)
-
 ## Tests
 
-`tests/test_petty_cash_settings_page.py` (the account-code rule, the first save, the two ways
-in, the codes as data, view-only, the disconnected notice),
-`tests/test_xero_data_and_onboarding_codes.py` (the mapping lists' database fallback and masked
-bank numbers, onboarding's codes rule), `tests/test_char_entities.py`,
-`tests/test_char_sales_methods.py`, `tests/test_payment_methods_permissions.py`,
-`tests/test_char_report_lifecycle.py` (the cash count with the currency's denominations),
-`tests/test_char_xero_sync.py` (the mapping and the cache);
-`e2e/03_settings.spec.ts` (the mapping and the sales-methods editor, end to end into the
-Sales page).
+`tests/test_petty_cash_api_settings.py` and `tests/test_petty_cash_api_xero_settings.py` (the
+screen's calls: country and currency, the sales methods, the mapping and the account-code rule),
+`tests/test_petty_cash_internal_xero_settings.py` (the internal route),
+`tests/test_xero_mapping_state.py`, `tests/test_xero_data_and_onboarding_codes.py` (the mapping
+lists' database fallback and masked bank numbers, onboarding's codes rule),
+`tests/test_payment_methods_permissions.py`, `tests/test_char_xero_sync.py` (the mapping and the
+cache), `tests/test_petty_cash_web_handoff.py` (the address's hand-off). The screen is tested in
+minty-petty-cash-web.

@@ -12,8 +12,8 @@ One `user` row per person (`blueprints/auth/models/user.py`). The columns that m
 | Column | Meaning |
 |---|---|
 | `username` | the email address — every sign-in path keys on it (`func.lower(username)`) |
-| `password` | Werkzeug hash; **empty/random for passwordless users** (OTP or Xero sign-ups) |
-| `approved` | sign-up gate; a user that is not approved cannot sign in |
+| `password` | Werkzeug hash, random for OTP or Xero sign-ups. **Nothing reads it since 2026-10-20** (password sign-in and reset were deleted); the hashes, `reset_token` and `reset_token_expiry` stay in the table |
+| `approved` | sign-up gate; a user that is not approved cannot sign in. Nothing in Minty sets it by hand any more (the `/admin` approve/reject tools went 2026-10-20); an accepted invitation sets it |
 | `system_role` | `normal` / `admin` / `superadmin` (`blueprints/shared/enums.SystemRole`); the code still calls the last one *superuser* (`services/permission_policy.SystemRole.SUPERUSER`) |
 | `xero_email` | the Xero-side identity when the account was created or linked through Xero |
 | `signed_in_at`, `last_seen_at` | presence stamps (section 8) |
@@ -23,16 +23,17 @@ The entity roles, lowest to highest: `entity_base` → `cashier` → `shop_manag
 `accountant` → `admin` → `super_admin` (`services/permission_policy.Role`, with the
 `ROLE_ALIASES` map for the older spellings such as `client` and `super admin`).
 
-## 2. The four ways in
+## 2. The three ways in
 
-All four end in Flask-Login's `login_user()`; the session is the same afterwards.
+All three end in Flask-Login's `login_user()`; the session is the same afterwards. There is no
+password sign-in: `POST /login`, `/reset_password*` and the reset email were deleted on
+2026-10-20 (owner's decision), so a person gets in by an emailed code or through Xero.
 
-**The sign-in PAGE is minty-web's `/login` since phase 2 (2026-10-05)** - log in and invitations
+**The sign-in PAGE is minty-web's `/login`** - log in and invitations
 (`?invite=&email=&fn=&ln=`); **sign-up is its own page, `/signup`** (2026-10-09), with the code on `/login/confirm`
-(`minty-web/features/auth`, its `docs/features/authentication.md`). Until then they were Flask's
-`/` (`templates/login/index.html`) and `/register` (`register.html`) plus minty-onboarding-web's
-`/auth` + `/auth/confirm`; those pages are deleted, and `/register` and onboarding's `/auth*` only
-forward. Flask stays the identity behind the page (2.2-2.4) and every way TO it goes through
+(`minty-web/features/auth`, its `docs/features/authentication.md`). Flask draws no page at all
+(since 2026-10-20); `/register` and minty-onboarding-web's `/auth*` only forward. Flask stays the
+identity behind the page (2.1-2.3) and every way TO it goes through
 `blueprints/auth/services/hub_login.hub_login_url`: the front door `GET /` (Flask-Login's
 `login_view`, so every `login_required` redirect), `/register`, an invitation link, Xero's
 wrong-account bounce. It keeps `next` when it is a path on this site (`safe_internal_path`) and
@@ -40,11 +41,7 @@ drains the flashes into a signed `?flash=` (the entity list's `hub-flash` hand-o
 `services/entity_list.sign_notices`), which the page reads back from the public
 `GET /auth/notices`. Flask-Login's "Please log in to access this page." is category `info`.
 
-### 2.1 Email + password — `POST /login`
-`blueprints/auth/routes/login.py`. Looks the user up by `username`, refuses an unapproved
-account, checks the hash. Superusers land on `/admin`, everyone else on `/index`.
-
-### 2.2 Email OTP — the passwordless path (also the sign-up path)
+### 2.1 Email OTP — the main path (also the sign-up path)
 `blueprints/auth/routes/email_auth.py` + `blueprints/auth/services/email_auth.py`:
 
 1. Is this address known? Asked by `POST /auth/email/request-code` itself in login mode
@@ -62,7 +59,7 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
 3. `POST /auth/email/verify-code` — a correct code either signs the existing user in, or —
    for a new address that came with a first and last name — creates the passwordless user
    on the spot (`_create_passwordless_user`), recording terms consent with source
-   `signup_otp`, or `signup_invite` when an invitation token rode along (section 2.4). A new
+   `signup_otp`, or `signup_invite` when an invitation token rode along (section 2.3). A new
    address with no name answers 404 "please sign up". Either way the answer carries a
    hand-off URL (step 4), with the page's `next` signed into it. (A separate "choose a username" step, `POST /auth/email/complete`,
    had no client and was deleted on 2026-10-01.)
@@ -70,13 +67,14 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
    sign-in page talks to Flask from another origin, so the verify answer carries a
    short-lived signed hand-off URL (`_HANDOFF_SALT`) that sets the cookie on Minty's origin,
    then goes to the signed `next` when it is a path on this site (checked again), else
-   `/admin` or `/index` (`tests/test_hub_sign_in.py`).
+   `/index` - the company list - for everyone, a superadmin included (`_post_login_redirect`,
+   `tests/test_hub_sign_in.py`).
 
 The mail goes out through Flask-Mail on Brevo SMTP (`SMTP_URL` / `MAIL_FROM` in `.env`); every
 SMTP step times out after the URL's `?timeout=` seconds (10), so a stalled server fails the send - the
 code request's open transaction included - instead of hanging it (`services/app_runtime/mail.py`).
 
-### 2.3 Sign in with Xero — `GET /xero_auth`
+### 2.2 Sign in with Xero — `GET /xero_auth`
 `blueprints/xero/routes/routes.py::xero_auth`. Plain OpenID Connect against Xero with
 scope `openid profile email offline_access` and `prompt=login`; the state is `auth` (or
 `auth:invite:<token>`). The callback (`/callback`) reads the email out of the id_token,
@@ -85,7 +83,7 @@ passwordless one with the Xero name, and signs them in. **This is identity only*
 company's Xero *connection* is a different flow with different scopes (`/xero_connect`,
 see [xero-integration.md](xero-integration.md)).
 
-### 2.4 Invitation
+### 2.3 Invitation
 `blueprints/invitation/`: someone sends an invite from the company's Users tab (minty-web;
 `POST /api/me/company/invitations`, `entity/routes/hub_settings.py`), the
 email link `GET /invitation/accept/<token>` bounces to the sign-in page (`hub_login_url`)
@@ -97,39 +95,24 @@ The sign-in page clears the invite from its address bar on arrival and hands it 
 `/login/confirm` in sessionStorage, not the query string. Pending invites can be listed, resent and
 cancelled from the company's Users tab (minty-web, phase 2).
 
-### Sign-up with approval (legacy)
-`GET/POST /register` creates nothing - it forwards to the hub's `/signup` (phase 2; the address
-was `/login?mode=signup` until 2026-10-09 - `hub_login_url(mode="signup")` builds it, so the mode
-is the PATH and never a query parameter), and sign-up runs through the OTP path above. The approval gate remains for older
-accounts that were never approved (`POST /approve_user/<id>` / `reject_user` on the
-`/admin` list).
-
-Password reset is the legacy `/login` page's "Forgot Password?" modal:
-`POST /reset_password` stores a `uuid4()` in `user.reset_token` with a 1-hour
-`reset_token_expiry` and emails a link to `/reset_password/<token>`, which sets the new
-password and clears both columns (`blueprints/auth/routes/password_reset.py`). The address
-is matched case-insensitively on `email` or `username`, and known or not it gets the same
-neutral flash, so the form cannot be used to find out who has an account; the link is built
-on `ACCOUNTS_API_URL` (the request host when that is unset).
+### Sign-up
+`GET/POST /register` creates nothing - it forwards to the hub's `/signup`
+(`hub_login_url(mode="signup")` builds it, so the mode is the PATH and never a query
+parameter), and sign-up runs through the OTP path above. The approval gate (`user.approved`,
+checked by `/auth/email/handoff`) remains for older accounts that were never approved.
 
 ### Email input: English only
 Every typed email address is printable ASCII (0x21-0x7E) and nothing else (2026-10-01).
 
-- **The fields** are `type="text" inputmode="email" … data-email-ascii`, not `type="email"`:
-  the browser's email input refuses Hangul before the "@" but takes it after, as an
-  international domain, and hands `.value` back as punycode (`xn--…`), so no script could
-  see it. `static/js/email_input.js` (minty-web `lib/emailInput.ts`'s twin) strips anything
-  else as it is typed (after an IME composition ends), keeps the caret, and shows "Email can
-  only contain English letters, numbers and symbols." under the field; the pages check the
-  shape with `MintyEmail.isEmail`. The fields: the legacy `/login` reset modal, the Users
-  tab's invite, `/entity/create` and the sidebar's My Profile - and minty-web's `/login`
-  (sign-in and sign-up, `lib/emailInput.ts`).
+- **The fields** are the Next apps' (`type="text" inputmode="email"`, never `type="email"`:
+  the browser's email input takes Hangul after the "@" as an international domain and hands
+  `.value` back as punycode, so no script could see it). minty-web's `lib/emailInput.ts` strips
+  anything else as it is typed; Flask has no fields of its own since 2026-10-20.
 - **The server** refuses one loudly in the same words (`blueprints/shared/email_rules.py`):
   `POST /auth/email/request-code` 400 (login mode too, before its 404), the invite
   (`/api/me/company/invitations`, `/api/onboarding/invite`) 400 - an invite's address must also
   be an address with no markup (`invite_address_error`) - the business email
-  (`/api/onboarding/create`, `PUT /api/onboarding/entity/<id>`, the `/entity/create` form) 400,
-  and My Profile (`PATCH /api/me/profile`) 422. The onboarding billing email and the payer
+  (`/api/onboarding/create`) 400, and My Profile (`PATCH /api/me/profile`) 422. The onboarding billing email and the payer
   portal's invite-admin are minty-subscription-api's since 2026-10-06 (it refuses them there).
 - Stored addresses are not rewritten.
 
@@ -163,8 +146,7 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
 
 - **Redirect targets.** Every redirect to a value the request supplied - `?next=` on
   `/entity/<id>/enter`, `/handoff/minty-web` and `/xero_auth` (checked when stored AND when
-  popped after the Xero round trip), the "back where you
-  came from" Referer redirects in `hooks.py` - goes through ONE rule,
+  popped after the Xero round trip) - goes through ONE rule,
   `blueprints/shared/safe_redirect.py`: a path on this site, no `//host`, no backslash, no
   control character (browsers drop tab/CR/LF, so `/%09/evil.com` arrived as `//evil.com`), no
   `..`, nothing `urlsplit` reads as a scheme or host. The Next apps share the same rule as
@@ -173,21 +155,17 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
   same-origin` (not `no-referrer`: `WTF_CSRF_SSL_STRICT` needs a same-origin Referer on HTTPS
   form posts), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, HSTS outside
   development, and `Cache-Control: no-store` on any page whose path holds a secret
-  (`/reset_password/<token>`, `/invitation/accept/<token>`, share links). The three Next apps
+  (`/invitation/accept/<token>`, share links; `http_hardening.SECRET_PATH_ARGS`). The three Next apps
   send the same set from `next.config.ts` (`frame-ancestors 'self'` instead of a full CSP).
 - **Logs never hold a secret from an address.** gunicorn's access log (it printed the whole
   request line) writes nothing: Render switched it back on through `GUNICORN_CMD_ARGS`
   (production's log held `/enter?token=` and `/callback?code=` lines, 2026-10-20), so
   `gunicorn.conf.py` sets `logger_class` to `services/app_runtime/gunicorn_logging.py`'s
   `NoAccessLogger`, which the environment cannot override; `http_hardening` logs `METHOD path status ms` with
-  the query string dropped and secret path segments shown as `[redacted]`. The Datadog
-  browser logs send `origin + path` only (`static/js/datadog-logs.js`, also scrubbing the
-  SDK's own `view.url`/`view.referrer`), and a share-link path as `/Minty_Report/[redacted]`.
-  Loguru's `diagnose` (variable values in tracebacks) is on in development only, and the Xero
+  the query string dropped and secret path segments shown as `[redacted]`. Loguru's `diagnose` (variable values in tracebacks) is on in development only, and the Xero
   token refresh no longer logs its Basic `Authorization` header.
-- **No state change by GET**: publishing to Xero, disconnecting Xero (a CSRF-checked form
-  POST since 2026-10-05) and the invite Terms check (`POST`, the token in the body) all refuse
-  GET.
+- **No state change by GET**: publishing to Xero, disconnecting Xero and the invite Terms check
+  (`POST`, the token in the body) all refuse GET.
 - **Still open** (recorded, not built): the five-minute `/auth/email/handoff?h=` token can be
   replayed inside its window (single use needs a store - a schema change); the Xero OAuth
   `state` carries no per-session nonce (login CSRF); `/logout` and `/leave-entity` are GETs;
@@ -211,16 +189,15 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
 - **Slug** (`slugify_name`, mirrored by minty-web's `lib/companyRef.ts`): lowercase, `&` -> "and",
   letters and digits of any script kept, anything else one `-`, 60 characters, `company` when empty.
   No schema change: nothing is stored.
-- **The scheme:**
+- **The scheme** (Flask draws none of these pages since 2026-10-20; each address hands over):
 
-  | Page | Address |
+  | Address | Goes to |
   |---|---|
-  | Dashboard | `/entity/<co>/petty-cash` (the bare `/entity/<co>` redirects there) |
-  | Report history, CSV | `/entity/<co>/petty-cash/reports`, `/petty-cash/reports/download-csv` |
-  | Wizard step | `/entity/<co>/petty-cash/reports/new/<step>`, `/entity/<co>/petty-cash/reports/<report_id>/<step>` (`opening`, `sale`, `expense`, `deposit`, `cash-count`, `ending`, `submitted`) |
-  | Resume; summaries | `/entity/<co>/petty-cash/reports/resume`; `/petty-cash/reports/summary` (by day), `/petty-cash/reports/<report_id>/summary` |
-  | Settings tabs | `/entity/<co>/settings/users`, `/integration`, `/petty-cash`, `/modules` (minty-web), `/payment-request` (the payments app) |
-  | Hand-overs | `/entity/<co>/enter`, `/payment-request`, `/modules`, `/xero-not-connected` |
+  | `/entity/<co>/petty-cash` (the bare `/entity/<co>` redirects there), `/entity/<co>/petty-cash/reports` (query kept) | minty-petty-cash-web's dashboard and `/reports`, through `/handoff/petty-cash-web` |
+  | `/entity/<co>/settings/users`, `/integration`, `/modules` | minty-web's settings tabs |
+  | `/entity/<co>/settings/petty-cash` | minty-petty-cash-web's `/settings/petty-cash`, through the same hand-off |
+  | `/entity/<co>/settings/payment-request`, `/entity/<co>/payment-request` | the payments app |
+  | `/entity/<co>/enter`, `/billing-relogin`, `/xero-not-connected` | sign-in returns; the last goes to the integration tab |
 
   Module names are `petty-cash` and `payment-request` (the user's call). minty-web's company pages are
   `/entity/<shortid>/<name>/…` too (the module page `…/settings/modules` since phase 2), and the payments app's pages are
@@ -232,12 +209,12 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
   so `PR/0001` arrives as `…/payment-request/PR%2F0001`), and its middleware sends another company's page back here
   (`minty-payment-request-web/docs/features/authentication.md`).
 - **Old addresses keep working** (`blueprints/shared/legacy_addresses.py`): each pre-2026-10-05 rule
-  308s straight to the readable address (308 keeps a form's method and body). Old `/report/...`
-  wizard GETs by a signed-in person move the same way (`report/routes/company_addresses.py`), which
-  also refuses (404, logged) a report shown under another company's address. Petty Cash moved
-  under its module name the same day (the user's call, matching `/payment-request`): the bare
+  308s straight to the readable address (308 keeps a form's method and body). The bare
   `/entity/<co>` and `/entity/<co>/reports[/...]` 308 to `/entity/<co>/petty-cash[/reports/...]`
-  (GET and POST, query kept). JSON APIs, OAuth,
+  (GET and POST, query kept), and the old report-page addresses `/entity/<uuid>/report/opening`
+  and `/entity/<uuid>/ending[/<report>]` to the dashboard hand-off. Flask's own report pages and
+  their `/report/...` and `/entity/<co>/petty-cash/reports/<step>` addresses were deleted on
+  2026-10-20 (404, JSON; `tests/test_flask_backend_only.py`). JSON APIs, OAuth,
   `/profile` and `/handoff/minty-web` keep the uuid.
 - Tests: `tests/test_entity_ref.py`; `F.co(app_or_client, entity_id)` gives a company's prefix.
 
@@ -245,26 +222,28 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
 
 `blueprints/legal/routes/gate.py::require_terms_acceptance` runs on every request: a
 signed-in user who has not accepted the current terms version is redirected to `/entity`
-(JSON callers get a JSON 403 instead of a redirect). There is no Flask acceptance screen -
-`/legal/accept` and `templates/legal/` were deleted on 2026-10-12 when the documents moved to
-minty-web, so **minty-web being up is part of Flask's sign-in path** for anyone who owes an
+(JSON callers get a JSON 403 instead of a redirect). There is no Flask acceptance screen (Flask
+draws no page), so **minty-web being up is part of Flask's sign-in path** for anyone who owes an
 acceptance. The page they were trying to reach is not remembered either: the panel lifts where
 they stand, in minty-web.
-`/entity` hands the browser to minty-web whether or not terms are owed (always, since phase 2 -
-the Jinja list and its panel are gone), and minty-web's own gate draws the panel over every
+`/entity` hands the browser to minty-web whether or not terms are owed, and minty-web's own gate draws the panel over every
 page of that app, recording through
 `POST /api/me/terms/accept` (bearer, `source = "hub"`). The allow-list is keyed on **endpoint
-names**, not paths: `legal.current` and the invite status route, minty-web's two bearer
-routes, the login/OTP endpoints,
-logout and `leave-entity`, static files. Versions, pinning and consent records are in
+names**, not paths (`ALLOWED_ENDPOINTS`): `health_check`, `auth.home`, `auth.register`,
+`auth.auth_notices`, the three OTP endpoints, `auth.logout`, the invitation link,
+`entity.entity_list`, `legal.current` and the invite status route, minty-web's two bearer
+routes, and `static`. Versions, pinning and consent records are in
 [legal-terms.md](legal-terms.md).
 
 ## 5. Roles and permissions inside Minty
 
 `services/permission_policy.py` is the matrix; `services/authz.py` has the decorators
 (`require_entity_access(entity_keys=…)`, `require_permission(Permission.X, entity_keys=…)`)
-that read the entity id from the URL, query string or body and answer 403 with the route's
-own wording.
+that read the entity id from the URL, query string or body. A refusal (`authz._forbidden`)
+answers a JSON caller 403 with the route's own wording (and `reason` when there is one); a
+browser gets that message flashed and a redirect to `/entity`, which carries it to minty-web's
+company list as a notice (an inactive module's as a warning). There is no `/no-permission` page
+since 2026-10-20.
 
 - `has_permission(user, permission, entity_id)` resolves the **effective role**: the
   `user_entity.role` (approved), or `super_admin` for a system superuser — but a superuser
@@ -277,8 +256,11 @@ own wording.
   `USER_ROLE_DELETE` need **accountant**; report editing/deleting has an *own* and an
   *entity* variant; `can_view_report` allows the creator or anyone with
   `REPORT_VIEW_ENTITY`.
-- The `/admin` pages and `/minty/api/users/create` / `…/<id>/consents` are superuser-only
-  (`blueprints/user_management/`); `/minty/api/users/me` is the person's own. A company's members
+- `/minty/api/users/create` and `/minty/api/users/<id>/consents` are superuser-only
+  (`blueprints/user_management/`, `blueprints/legal/routes/admin.py`); the superuser's Flask
+  pages (`/admin`, `/admin_dashboard`, approve/reject, `/find_user`, the statement and
+  attachment downloads) were deleted on 2026-10-20, and a superadmin signs in to the company
+  list like everyone; `/minty/api/users/me` is the person's own. A company's members
   are managed per company - minty-web's Users tab over `/api/me/company/*` (each action its
   permission and the rank rule; [entities-and-members.md](entities-and-members.md)).
 
@@ -306,14 +288,9 @@ and comes back for a fresh token through `GET /handoff/minty-web?next=&entity_id
 token — bearer only, and a token naming an unknown or switched-off (`approved` false) account is
 refused like a bad one. Its CORS names the caller when it is `MINTY_WEB_URL` or
 `PAYMENT_REQUEST_WEB_URL` (minty-payment-request-web, whose copy of the sidebar's My Profile reads and saves the
-same profile since 2026-09-30), minty-web's otherwise. This app's own pages draw that sidebar
-too ([sidebar.md](sidebar.md)): `GET /me/sidebar-token` (session, same-origin, `no-store`, a 401
-rather than a redirect when signed out) hands the page an unscoped module token, and the page
-calls the same routes with it. The profile's header avatar and the sidebar open My Profile in
-place; the avatar's `href` - `GET /profile?entity_id=&from=` (`modules.py::open_profile`) - is
-the way in when scripts are off, and still the payments app's old links (its `/profile*`
-addresses forward here): it mints the token at the click and hands over to minty-web's My Profile
-- always, since minty-payment-request-web's profile page was deleted on 2026-10-01. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
+same profile since 2026-09-30), minty-web's otherwise. `GET /profile?entity_id=&from=`
+(`modules.py::open_profile`) is the way in for the payments app's old links (its `/profile*`
+addresses forward here): it mints the token at the click and hands over to minty-web's My Profile. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
 re-establishes the Flask session). Since 2026-10-05 it takes a **module** token only (`module`
 claim = `MODULE_TOKEN_CLAIM`; the onboarding token is refused) and signs in only a member of
 `<id>` (or a superuser); before that ANY token signed with the key - the onboarding one
@@ -326,7 +303,7 @@ secret (their `e2e/README.md` explains why nothing is bypassed by that).
 - **No refresh.** A lapsed token comes back through the same route.
 - **Calls.** The app calls Petty Cash's bearer API, `/api/petty-cash/v1/companies/<id>/...` ([petty-cash-api.md](petty-cash-api.md)). That door fails closed and takes only a **module** token.
 - **My Profile.** The app reads My Profile through the hub surface, whose CORS also names `PETTY_CASH_WEB_URL`.
-- **Flask's own sidebar.** Where `PETTY_CASH_WEB_URL` is set, the Petty Cash Dashboard and Reports rows on Flask's Jinja pages go through this hand-off to the app (`blueprints/shared/sidebar.py`); unset, they stay on Flask's pages.
+- **Flask's old Petty Cash addresses.** `/entity/<co>/petty-cash`, `/entity/<co>/petty-cash/reports` and `/entity/<co>/settings/petty-cash` always redirect into this hand-off (`petty_cash_web_handoff_url`); the older front ends, the emails and Xero's callback still land on them. `/Minty_Report/<path>/` 308s to the app's `/share/<path>`.
 - **Hosts (Step 5, 2026-10-16).** The app is `pettycash.dailyminty.com` (`dev-pettycash.`), Flask becomes `accounts-api.dailyminty.com` (`dev-accounts-api.`) and the Django Petty Cash API is `pettycash-api.` (`docs/ENVIRONMENT.md` section 8).
 
 The entitlement claims in the token are a hint only: minty-payment-request-api re-reads
@@ -355,9 +332,10 @@ set, Flask hands a person back into the set they came from instead of the config
   - a navigation from another of our hosts with no `return_origin` (`same-site`: production's
     front ends), from the address bar or a bookmark (`none`), or with no fetch metadata - the
     configured front end, and the stored set is left;
-  - only a hop that can't name one reads the stored set: a link on a Flask page (`same-origin`)
-    and Xero's OAuth return (`cross-site`). So a Flask Petty Cash page hands back to the side the
-    person last came from - with two tabs interleaved, that can be the other tab's side;
+  - only a hop that can't name one reads the stored set: a `same-origin` navigation (Flask has no
+    pages since 2026-10-20, so in practice none) and Xero's OAuth return (`cross-site`), which
+    hands back to the side the person last came from - with two tabs interleaved, that can be
+    the other tab's side;
   - fetches (`Sec-Fetch-Mode` other than `navigate`: the hubs' API calls) neither read nor leave it.
 - **Only a same-site navigation names a set, and a stored set lapses after 30 minutes** (security
   review, 2026-10-13). The browser's `Sec-Fetch-Site` is `same-site` for a trip from another
@@ -434,12 +412,11 @@ the payment module counts as leaving.
 |---|---|
 | `SECRET_KEY` | sessions, CSRF, both hand-off JWTs, the internal token assertion — **shared with the three Django APIs** |
 | `SESSION_TYPE`, `SESSION_SQLALCHEMY_TABLE` | server-side sessions (`sqlalchemy`, `sessions`) |
-| `SMTP_URL`, `MAIL_FROM` | OTP, invitation and reset mail |
+| `SMTP_URL`, `MAIL_FROM` | OTP and invitation mail |
 | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | both OAuth flows (redirect URI `ACCOUNTS_API_URL/callback`; `http://localhost:8000/callback` locally) |
 | `ACCOUNTS_API_URL` (alias `PETTY_CASH_URL`) | Flask's own address (`accounts-api.dailyminty.com`): absolute links in mail and the Xero redirect URI. `ACCOUNTS_API_URL` wins; `PETTY_CASH_URL` is read only when it is unset. Both unset is refused at start-up outside development (`services/app_runtime/env.accounts_api_url`) |
-| `PETTY_CASH_WEB_URL` | minty-petty-cash-web's origin: `/handoff/petty-cash-web`'s target, the Petty Cash API's and hub routes' CORS, and (only when set) the sidebar's Petty Cash rows |
+| `PETTY_CASH_WEB_URL` | minty-petty-cash-web's origin (default `http://localhost:3010`): `/handoff/petty-cash-web`'s target, the share-link redirect, the Petty Cash API's and hub routes' CORS |
 | `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL` | minty-web's and minty-payment-request-web's origins - the hand-offs, and the hub routes' CORS |
-| `SUBSCRIPTION_API_URL` | minty-subscription-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8001`) |
 | `PREVIEW_ORIGIN_REGEX` | optional: the branch preview sets Flask may hand back into (section 6.1); unset = off |
 | `IDLE_TIMEOUT_SECONDS` | the presence window (there is no idle logout) |
 
@@ -447,9 +424,9 @@ Every service's variables are listed in [`docs/ENVIRONMENT.md`](../ENVIRONMENT.m
 
 ## 10. Where it is tested
 
-`tests/test_auth_register_login.py`, `tests/test_login_flash_drain.py` and
-`tests/test_xero_login_flash_drain.py` (the sign-in paths), `tests/test_password_reset.py`
-(the reset email, the neutral answer, expired and spent links), `tests/test_terms_signup_consent.py`
+`tests/test_auth_register_login.py` and
+`tests/test_xero_login_flash_drain.py` (the sign-in paths), `tests/test_hub_sign_in.py`,
+`tests/test_terms_signup_consent.py`
 (OTP sign-up, invite tokens, consent sources),
 `tests/test_authz_decorators.py`, `tests/test_user_permission_matrix_coverage.py` (every
 write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py`,
@@ -457,6 +434,8 @@ write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py
 `tests/test_xero_scopes.py` (connect and reconnect request the same minimal scope set),
 `tests/test_zz_no_token_logging.py`, `tests/test_preview_origin.py` (preview sets, 6.1), `tests/test_url_security.py` (the redirect rule, `/enter`'s
 token and membership checks, the headers, the redacted access log, GET refusals, the deleted
-routes, the download and export guards), `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
-origins), `tests/test_email_english_only.py` (every path refuses a non-English address); in the browser, `e2e/01_login.spec.ts` (login, wrong
-password, the terms modal on first sign-in) and the two Next suites' hand-off specs.
+routes), `tests/test_email_english_only.py` (every path refuses a non-English address),
+`tests/test_flask_backend_only.py` (the retired addresses answer 404 JSON; the redirects) and
+`tests/test_zz_no_html_frontend.py` (no templates, no `render_template`, no GET route answers
+`text/html`). Flask has no browser specs of its own; the sign-in screens are tested in
+minty-web's e2e suite.

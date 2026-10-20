@@ -1,3 +1,11 @@
+"""Share links (``report/services/share.py``): who may make one, and what opening one resolves to.
+
+Opening a link was Flask's ``/Minty_Report/<path>/`` page until Flask's HTML frontend was deleted
+(2026-10-20); that address now hands over to minty-petty-cash-web's ``/share/<path>``, which reads
+the day from the Petty Cash API's ``GET /api/petty-cash/v1/public/share/<path>`` - the same
+``resolve_share``. The API's own answers (no cache, no referrer, the 404 / 410 bodies) are
+tests/test_petty_cash_api_public_share.py's.
+"""
 from __future__ import annotations
 
 import re
@@ -31,45 +39,6 @@ class _FakeGetQuery:
 
     def get(self, *_args, **_kwargs):
         return self._result
-
-
-def test_generate_share_link_route_does_not_call_permission_checks(
-    app, monkeypatch
-):
-    from blueprints.report.routes import api
-
-    handler = getattr(api.generate_share_link, "__wrapped__", api.generate_share_link)
-    called = {}
-
-    def fake_create_share_link(user_id, payload):
-        called["user_id"] = user_id
-        called["payload"] = payload
-        return {"url": "https://example.test/Minty_Report/AB/01_Jan_2026"}, 200
-
-    with app.app_context():
-        with app.test_request_context(
-            "/api/generate_share_link",
-            method="POST",
-            json={"entity_id": "entity-1", "transaction_date": "2026-01-01"},
-        ):
-            monkeypatch.setattr(
-                api,
-                "has_permission",
-                lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                    AssertionError("generate_share_link should not check has_permission")
-                ),
-            )
-            monkeypatch.setattr(api, "current_user", SimpleNamespace(id="user-1"))
-            monkeypatch.setattr(
-                api, "create_share_link_for_report", fake_create_share_link
-            )
-
-            response, status = handler()
-
-    assert status == 200
-    assert response.get_json()["url"] == "https://example.test/Minty_Report/AB/01_Jan_2026"
-    assert called["user_id"] == "user-1"
-    assert called["payload"]["entity_id"] == "entity-1"
 
 
 def test_create_share_link_for_report_uses_membership_not_role_permissions(
@@ -134,53 +103,6 @@ def test_generate_share_link_denies_membership_missing(app, monkeypatch):
     assert response["error"] == "You don't have access to this entity"
 
 
-def test_public_share_route_calls_report_ending_without_auth_gate(app, monkeypatch):
-    from blueprints.report.routes import legacy
-    from blueprints.report.services import ending as ending_service
-    from blueprints.report.services import share
-
-    called = {}
-    future = datetime.now() + timedelta(days=1)
-    share_link = SimpleNamespace(
-        id="link-1",
-        token="signed-token",
-        entity_id="entity-1",
-        transaction_date=date(2026, 3, 11),
-        expires_at=future,
-    )
-
-    with app.app_context():
-        monkeypatch.setattr(legacy.ShareLink, "query", _FakeFilterQuery(share_link))
-        monkeypatch.setattr(legacy.Entity, "query", _FakeGetQuery(SimpleNamespace()))
-        monkeypatch.setattr(
-            legacy.Report, "query", _FakeFilterQuery(SimpleNamespace(id="report-1"))
-        )
-        monkeypatch.setattr(
-            share,
-            "verify_share_token",
-            lambda *_args, **_kwargs: (
-                True,
-                {"entity_id": "entity-1", "transaction_date": "2026-03-11"},
-            ),
-        )
-
-        def fake_report_ending(id=None, entity_id=None, skip_auth=False):
-            called["id"] = id
-            called["entity_id"] = entity_id
-            called["skip_auth"] = skip_auth
-            return ("shared-report", 200)
-
-        monkeypatch.setattr(ending_service, "report_ending", fake_report_ending)
-
-        with app.test_request_context(f"/Minty_Report/AB/11_Mar_2026/{_SECRET}/"):
-            response = legacy.minty_report_share(f"AB/11_Mar_2026/{_SECRET}")
-
-    assert response == ("shared-report", 200)
-    assert called["id"] == "report-1"
-    assert called["entity_id"] == "entity-1"
-    assert called["skip_auth"] is True
-
-
 # --- Through the real database: guessing and same-initials collisions ------------------
 
 SHARE_DAY = date(2026, 9, 27)
@@ -216,21 +138,6 @@ def twins(app, db):
     return owner, venus, venus2
 
 
-@pytest.fixture
-def rendered(monkeypatch):
-    """Stand in for the ending page: record which company the link rendered."""
-    from blueprints.report.services import ending as ending_service
-
-    seen = []
-
-    def fake_report_ending(id=None, entity_id=None, skip_auth=False):
-        seen.append(str(entity_id))
-        return f"report-of-{entity_id}"
-
-    monkeypatch.setattr(ending_service, "report_ending", fake_report_ending)
-    return seen
-
-
 def _share(app, user_id, entity_id, day=SHARE_DAY) -> str:
     """Create the link through the service; return its path after /Minty_Report/."""
     from blueprints.report.services import share
@@ -243,11 +150,13 @@ def _share(app, user_id, entity_id, day=SHARE_DAY) -> str:
 
 
 def _open(client, path):
-    return client.get(f"/Minty_Report/{path}", follow_redirects=False)
+    """Open the link as anyone holding it does: minty-petty-cash-web's read of the API."""
+    return client.get(f"/api/petty-cash/v1/public/share/{path.rstrip('/')}",
+                      headers={"Origin": "http://localhost:3010"})
 
 
 def test_same_initials_get_separate_links_that_each_show_their_own_company(
-        app, client, twins, rendered):
+        app, client, twins):
     owner, venus, venus2 = twins
 
     venus_path = _share(app, owner.id, venus.id)
@@ -257,10 +166,9 @@ def test_same_initials_get_separate_links_that_each_show_their_own_company(
     assert venus2_path.startswith("DAV/27_Sep_2026/")
     assert venus_path != venus2_path
 
-    assert _open(client, venus_path).status_code == 200
-    assert _open(client, venus2_path).status_code == 200
     # The first company's link still shows the first company after the second shared.
-    assert rendered == [str(venus.id), str(venus2.id)]
+    assert _open(client, venus_path).get_json()["company_name"] == "Dine at Venus"
+    assert _open(client, venus2_path).get_json()["company_name"] == "Dine at Venus 2"
 
 
 def test_sharing_the_same_day_again_keeps_the_url_and_renews_expiry(app, db, twins):
@@ -280,7 +188,7 @@ def test_sharing_the_same_day_again_keeps_the_url_and_renews_expiry(app, db, twi
         assert links[0].expires_at > datetime.now(timezone.utc) + timedelta(days=29)
 
 
-def test_guessed_or_edited_paths_are_refused(app, client, twins, rendered):
+def test_guessed_or_edited_paths_are_refused(app, client, twins):
     owner, venus, _ = twins
     path = _share(app, owner.id, venus.id)
     prefix, secret = path.rstrip("/").rsplit("/", 1)
@@ -292,13 +200,11 @@ def test_guessed_or_edited_paths_are_refused(app, client, twins, rendered):
         f"{prefix}/{secret[:-1]}/",               # secret truncated
     ):
         resp = _open(client, guess)
-        assert resp.status_code == 302, guess
-        assert "/entity" in resp.headers["Location"], guess
-    assert rendered == []
+        assert resp.status_code == 404, guess
 
 
 def test_an_old_form_row_still_in_the_database_is_refused_and_replaced(
-        app, db, client, twins, rendered):
+        app, db, client, twins):
     from models.db import ShareLink
 
     owner, venus, _ = twins
@@ -309,8 +215,7 @@ def test_an_old_form_row_still_in_the_database_is_refused_and_replaced(
             expires_at=datetime.now(timezone.utc) + timedelta(days=10)))
         db.session.commit()
 
-    assert _open(client, "DAV/27_Sep_2026/").status_code == 302
-    assert rendered == []
+    assert _open(client, "DAV/27_Sep_2026/").status_code == 404
 
     # Sharing that day again moves the row to a secret path; the old address stays dead.
     new_path = _share(app, owner.id, venus.id)
@@ -320,7 +225,7 @@ def test_an_old_form_row_still_in_the_database_is_refused_and_replaced(
         assert ShareLink.query.filter_by(entity_id=venus.id).count() == 1
 
 
-def test_expired_link_is_refused_and_removed(app, db, client, twins, rendered):
+def test_expired_link_is_refused_and_removed(app, db, client, twins):
     from models.db import ShareLink
 
     owner, venus, _ = twins
@@ -331,8 +236,7 @@ def test_expired_link_is_refused_and_removed(app, db, client, twins, rendered):
         db.session.commit()
 
     resp = _open(client, path)
-    assert resp.status_code == 302
-    assert rendered == []
+    assert resp.status_code == 410
     with app.app_context():
         assert ShareLink.query.filter_by(entity_id=venus.id).count() == 0
 
@@ -347,7 +251,7 @@ def _link(app, entity_id):
         return ShareLink.query.filter_by(entity_id=entity_id).one_or_none()
 
 
-def test_a_token_that_fails_its_signature_is_refused_and_removed(app, db, client, twins, rendered):
+def test_a_token_that_fails_its_signature_is_refused_and_removed(app, db, client, twins):
     from models.db import ShareLink
 
     owner, venus, _ = twins
@@ -357,12 +261,11 @@ def test_a_token_that_fails_its_signature_is_refused_and_removed(app, db, client
         db.session.commit()
 
     resp = _open(client, path)
-    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
-    assert rendered == []
+    assert resp.status_code == 404
     assert _link(app, venus.id) is None
 
 
-def test_a_token_for_another_company_or_day_is_refused_and_kept(app, db, client, twins, rendered):
+def test_a_token_for_another_company_or_day_is_refused_and_kept(app, db, client, twins):
     from models.db import ShareLink
     from utils import generate_share_token
 
@@ -374,26 +277,12 @@ def test_a_token_for_another_company_or_day_is_refused_and_kept(app, db, client,
         db.session.commit()
 
     resp = _open(client, path)
-    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
-    assert rendered == []
+    assert resp.status_code == 404
     assert _link(app, venus.id) is not None
 
 
-def test_a_link_whose_company_is_missing_is_refused(app, db, client, twins, rendered, monkeypatch):
-    from blueprints.report.routes import legacy
-
-    owner, venus, _ = twins
-    path = _share(app, owner.id, venus.id)
-    with app.app_context():
-        monkeypatch.setattr(legacy.Entity, "query", _FakeGetQuery(None))
-
-    resp = _open(client, path)
-    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
-    assert rendered == []
-
-
 @pytest.mark.parametrize("change", ["draft", "deleted"])
-def test_a_day_that_is_a_draft_again_or_has_no_report_is_refused(app, db, client, twins, rendered, change):
+def test_a_day_that_is_a_draft_again_or_has_no_report_is_refused(app, db, client, twins, change):
     from blueprints.shared.enums import ReportStatus
     from models.db import Report
 
@@ -408,6 +297,16 @@ def test_a_day_that_is_a_draft_again_or_has_no_report_is_refused(app, db, client
         db.session.commit()
 
     resp = _open(client, path)
-    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
-    assert rendered == []
+    assert resp.status_code == 404
     assert _link(app, venus.id) is not None
+
+
+def test_a_link_whose_company_is_missing_is_refused(app, db, client, twins, monkeypatch):
+    from blueprints.report.services import share
+
+    owner, venus, _ = twins
+    path = _share(app, owner.id, venus.id)
+    with app.app_context():
+        monkeypatch.setattr(share.Entity, "query", _FakeGetQuery(None))
+
+    assert _open(client, path).status_code == 404

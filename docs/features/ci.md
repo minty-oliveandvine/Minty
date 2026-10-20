@@ -127,13 +127,15 @@ address form, which needs Stripe keys by design).
 
 ### Which suites it can run
 
-`Minty`, `minty-web` and `minty-payment-request-web`. **`minty-onboarding-web` is refused by
-name**: its `walk` and `resume` specs need a disposable entity in `onboarding` status
-(`E2E_ENTITY_ID`) that `scripts/e2e_seed.py` does not create yet. Adding that to the seed is what
-it takes to let that suite in.
+`e2e.yml` offers `minty-web` (the default), `Minty` and `minty-payment-request-web`.
+**`minty-onboarding-web` is refused by name**: its `walk` and `resume` specs need a disposable
+entity in `onboarding` status (`E2E_ENTITY_ID`) that `scripts/e2e_seed.py` does not create yet.
+Adding that to the seed is what it takes to let that suite in.
 
-`Minty/e2e/04_xero_publish.spec.ts` stays skipped (`E2E_XERO` unset): it writes real bank
-transactions into a Xero demo company, which is a local, deliberate act.
+**Flask has no browser specs of its own since 2026-10-20**: it draws no page, and the specs that
+drove its Jinja pages (`02_report_wizard`, `03_settings`, `04_xero_publish`) went with them. The
+browser journeys are the Next apps' suites; Minty's part of the job is the stack, the schema and
+the seed. What is left in `Minty/e2e/` is described by `e2e/README.md`.
 
 ### Rehearsing it locally
 
@@ -163,7 +165,7 @@ If it does not pass here it will not pass in CI.
 The modernisation plan called for a repo to hold "the cross-service journeys no app owns". They
 are owned: `minty-web/e2e/04_live_api.spec.ts` starts a real trial through the subscription API
 and asserts this app's `entity_function_map` gate opened; `minty-onboarding-web/e2e/walk.spec.ts`
-finalizes an entity across four services; `Minty/e2e/04_xero_publish.spec.ts` publishes for real.
+finalizes an entity across four services.
 What was missing was never a repo — it was something that stands the stack up and runs them, and
 that is `stack-e2e.yml`. Unit tests and each app's Playwright suite stay in their own repo, where
 they can gate their own pull request.

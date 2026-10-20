@@ -1,28 +1,28 @@
-"""Characterisation: an expense's receipts - stored, listed, downloadable, and gone with the line.
+"""Characterisation: an expense's receipts - stored, listed, and gone with the line.
 
 C4 moves the receipt from two text columns on the expense (``files``, ``s3_key`` - a
 comma-separated list of keys) to rows: ``attachment`` + ``report_expense_attachment``. What
 the user sees must not move:
 
-* ``POST /report/expense/add`` answers ``expense.files`` as
-  ``[{s3_key, display_name, mime_type}]`` and the bytes are in the bucket under ``s3_key``;
-* the expense page carries the same list per line (``data-expense-files``), the draft
-  endpoint ``/report/expense/draft/<id>`` answers the first file's name and key;
-* ``GET /download/<s3_key>`` hands out the file (a redirect to the store's URL);
+* adding a line stores its receipt's bytes in the bucket under a key minted from the day, the
+  item and the amount;
+* the Expenses step lists the same receipt per line;
 * deleting the line deletes its receipt from the bucket; deleting the report deletes every
   receipt (F2, asserted in test_char_report_lifecycle).
 
+Driven through the Jinja Expenses page and its routes (``/report/expense/*``, ``/download``,
+``/preview``) until Flask's HTML frontend was deleted (2026-10-20); now through the Expenses
+service and the Petty Cash API (a receipt's bytes by id: tests/test_petty_cash_api_expenses.py).
+
 Finding F6 (2026-09-17, writing these): the draft / update / delete endpoints crashed on
 ``expense.report_draft`` (the relationship is ``report``). Fixed in C4, with the receipts
-becoming ``attachment`` rows: the draft endpoint reads the uploaded name and type from the
-row, and deleting a line deletes its receipt from the store (F2).
+becoming ``attachment`` rows, and deleting a line deletes its receipt from the store (F2).
 
 The S3 client is the FakeS3 at ``get_s3_client`` (tests/char_factories.py).
 """
 
 from __future__ import annotations
 
-import json
 from datetime import date
 
 import pytest
@@ -73,15 +73,16 @@ def day(shop, client, s3):
     return owner, entity
 
 
-def expense_page_files(client, entity) -> dict[str, list]:
-    """expense id -> files list, as the expense page embeds it per line."""
-    import re
+def _api(client, owner, entity):
+    return f"/api/petty-cash/v1/companies/{entity.id}", F.petty_cash_headers(client.application, owner.id)
 
-    html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/expense?transaction_date={F.iso(DAY)}").get_data(as_text=True)
-    out = {}
-    for m in re.finditer(r'data-expense-id="([^"]+)"(.*?)data-expense-files="([^"]*)"', html, re.S):
-        out[m.group(1)] = json.loads(m.group(3).replace("&quot;", '"').replace("&#34;", '"'))
-    return out
+
+def expense_step_receipts(client, owner, entity) -> dict[str, list]:
+    """expense id -> its receipts' names, as the Expenses step lists them per line."""
+    base, headers = _api(client, owner, entity)
+    resp = client.get(f"{base}/reports/expenses", query_string={"transaction_date": F.iso(DAY)}, headers=headers)
+    assert resp.status_code == 200, resp.get_json()
+    return {line["id"]: [r["name"] for r in line["receipts"]] for line in resp.get_json()["lines"]}
 
 
 def test_an_added_expense_carries_its_receipt_and_the_bytes_are_stored(day, client, s3):
@@ -90,58 +91,45 @@ def test_an_added_expense_carries_its_receipt_and_the_bytes_are_stored(day, clie
 
     files = body["expense"]["files"]
     assert len(files) == 1
-    # the stored name is minted from the day, the item and the amount: 01_SEP_2026_TAPE_12.jpg
-    assert "TAPE" in files[0]["display_name"].upper() and files[0]["display_name"].endswith(".jpg")
     key = files[0]["s3_key"]
+    # the stored name is minted from the day, the item and the amount: 01_SEP_2026_TAPE_12.jpg
+    assert "TAPE" in key.upper() and key.endswith(".jpg")
     assert key in s3.objects, (key, list(s3.objects))
-    assert s3.objects[key] == F.receipt("Tape.jpg")[0].getvalue()
+    assert s3.objects[key] == b"\xff\xd8\xff\xe0fake-jpeg-bytes"
 
 
-def test_the_expense_page_and_the_draft_endpoint_list_the_same_receipt(day, client, s3):
+def test_the_expense_step_lists_the_receipt(day, client, s3):
     owner, entity = day
-    body = add_expense(client, entity, DAY, "Milk", "7.25")
-    expense_id = body["expense"]["id"]
-    key = body["expense"]["files"][0]["s3_key"]
+    expense_id = add_expense(client, entity, DAY, "Milk", "7.25")["expense"]["id"]
 
-    listed = expense_page_files(client, entity)
-    assert expense_id in listed, listed
-    assert [f["s3_key"] for f in listed[expense_id]] == [key]
+    listed = expense_step_receipts(client, owner, entity)
 
-    draft = client.get(f"/report/expense/draft/{expense_id}")
-    assert draft.status_code == 200, draft.data[:300]
-    d = draft.get_json()["draft"]
-    assert d["s3_key"] == key
-    assert d["original_filename"].startswith("Milk")
+    assert listed == {expense_id: ["Milk.jpg"]}
 
 
 def test_patching_a_draft_line_moves_its_amount_exactly(app, day, client, s3):
-    """PATCH /report/expense/draft/<id>: the detail fields of one line, only the keys sent.
-
-    The one schema-touching route nothing else requests (tests/_baseline/route_inventory.json).
-    The amount lands as exact money in the database (``Money()`` reads it back as a float by
-    the C4 decision, so the exactness check is on the stored text).
-    """
-    from models.db import ReportExpense, db
+    """The Expenses step's edit of one line, only the fields sent. The amount lands as exact
+    money in the database (``Money()`` reads it back as a float by the C4 decision, so the
+    exactness check is on the stored text)."""
+    from models.db import db
 
     owner, entity = day
     expense_id = add_expense(client, entity, DAY, "Stamps", "3.10")["expense"]["id"]
+    base, headers = _api(client, owner, entity)
 
-    resp = client.patch(
-        f"/report/expense/draft/{expense_id}",
-        json={"amount": "1,234.56", "item": "Postage", "remarks": ""},
-    )
+    resp = client.patch(f"{base}/expense-lines/{expense_id}", data={"amount": "1,234.56", "remarks": ""},
+                        content_type="multipart/form-data", headers=headers)
 
-    assert resp.status_code == 200, resp.data[:300]
+    assert resp.status_code == 200, resp.get_json()
     with app.app_context():
-        row = ReportExpense.query.get(expense_id)
-        assert row.item == "Postage" and row.remarks is None  # an empty remark is cleared
         stored = db.session.execute(
             db.text(f"SELECT CAST(amount AS TEXT) FROM {pg_harness.APP_SCHEMA}.report_expense WHERE id = :id"),
             {"id": expense_id},
         ).scalar()
         assert stored == "1234.56", stored  # numeric(14,2): exactly, no float residue
-    # a line that is not there is "no draft", not a 500
-    assert client.patch(f"/report/expense/draft/{F.new_id()}", json={"item": "x"}).status_code == 404
+    # a line that is not there is a 404, not a 500
+    assert client.patch(f"{base}/expense-lines/{F.new_id()}", data={"remarks": "x"},
+                        content_type="multipart/form-data", headers=headers).status_code == 404
 
 
 def test_a_receipt_is_stored_under_a_normalised_name(day, client, s3):
@@ -155,45 +143,8 @@ def test_a_receipt_is_stored_under_a_normalised_name(day, client, s3):
     key = file["s3_key"]
     assert re.fullmatch(r"expenses/[0-9a-f-]{36}/01_SEP_2026_STAFF_WELFARE_MEAL_TRANSPORT_AND_ETC_547\.jpg", key), key
     assert key in s3.objects
-    # the page lists ONE file for the line, and the download resolves it
-    listed = expense_page_files(client, entity)[body["expense"]["id"]]
-    assert [f["s3_key"] for f in listed] == [key]
-    assert client.get(f"/download/{key}").status_code == 302
-
-
-def test_a_receipt_downloads_from_the_store(day, client, s3):
-    owner, entity = day
-    key = add_expense(client, entity, DAY, "Taxi", "80.00")["expense"]["files"][0]["s3_key"]
-
-    resp = client.get(f"/download/{key}")
-
-    assert resp.status_code == 302, resp.data[:300]
-    assert key in resp.headers["Location"]
-
-
-def test_a_receipt_previews_from_this_origin(day, client, s3):
-    # pdf.js fetches a PDF, so the Expenses step's preview reads the bytes here rather than
-    # through /download's redirect to the bucket (2026-10-05)
-    owner, entity = day
-    key = add_expense(client, entity, DAY, "Taxi", "80.00")["expense"]["files"][0]["s3_key"]
-
-    resp = client.get(f"/preview/{key}")
-
-    assert resp.status_code == 200, resp.data[:300]
-    assert resp.data == s3.objects[key]
-    assert resp.headers["Content-Type"] == "image/jpeg"
-    assert resp.headers["Content-Disposition"] == "inline"
-    assert resp.headers["X-Content-Type-Options"] == "nosniff"
-
-
-def test_a_receipt_larger_than_an_upload_is_not_previewed(day, client, s3):
-    from blueprints.report.routes.download import RECEIPT_PREVIEW_MAX_BYTES
-
-    owner, entity = day
-    key = add_expense(client, entity, DAY, "Big", "1.00")["expense"]["files"][0]["s3_key"]
-    s3.objects[key] = b"x" * (RECEIPT_PREVIEW_MAX_BYTES + 1)
-
-    assert client.get(f"/preview/{key}").status_code == 413
+    # the step lists ONE receipt for the line
+    assert len(expense_step_receipts(client, owner, entity)[body["expense"]["id"]]) == 1
 
 
 def test_deleting_the_line_deletes_its_receipt(day, client, s3):
@@ -202,23 +153,33 @@ def test_deleting_the_line_deletes_its_receipt(day, client, s3):
     gone = add_expense(client, entity, DAY, "Gone", "2.00")["expense"]
     gone_key = gone["files"][0]["s3_key"]
     assert gone_key in s3.objects
+    base, headers = _api(client, owner, entity)
 
-    resp = client.delete(f"/report/expense/delete/{gone['id']}")
+    resp = client.delete(f"{base}/expense-lines/{gone['id']}", headers=headers)
 
-    assert resp.status_code == 200, resp.data[:300]
+    assert resp.status_code == 200, resp.get_json()
     assert gone_key not in s3.objects, "the receipt outlived its expense"
     assert keep["files"][0]["s3_key"] in s3.objects
-    assert set(expense_page_files(client, entity)) == {keep["id"]}
+    assert set(expense_step_receipts(client, owner, entity)) == {keep["id"]}
 
 
-def test_a_line_may_carry_two_receipts(day, client, s3):
+def test_a_line_may_carry_two_receipts(app, day, client, s3):
+    from io import BytesIO
+
+    from werkzeug.datastructures import FileStorage
+
+    from blueprints.report.services.expenses import add_expense as add
+    from blueprints.report.services.opening import find_draft
+    from models.db import User, db
+
     owner, entity = day
-    form = {"entity_id": entity.id, "transaction_date": F.iso(DAY), "item": "Dinner", "amount": "300.00",
-            "remarks": "", "files[0][0]": F.receipt("bill.jpg"), "files[0][1]": F.receipt("card-slip.jpg")}
-    resp = client.post("/report/expense/add", data=form, content_type="multipart/form-data")
-    assert resp.status_code == 200, resp.data[:300]
-    files = resp.get_json()["expense"]["files"]
+    with app.app_context():
+        files = [FileStorage(BytesIO(b"\xff\xd8\xff" + name.encode()), filename=name, content_type="image/jpeg")
+                 for name in ("bill.jpg", "card-slip.jpg")]
+        line = add(find_draft(entity.id, DAY), db.session.get(User, owner.id), item="Dinner", amount=300.0, remarks="",
+                   contact_id=None, contact_name=None, account_id=None, account_code=None, files=files)
+        keys = line.receipt_keys
 
-    assert len(files) == 2, files
-    assert {f["display_name"].split(".")[0].rsplit("_", 1)[0] for f in files} >= {"bill", "card-slip"} or len(files) == 2
-    assert all(f["s3_key"] in s3.objects for f in files)
+    assert len(keys) == 2 and len(set(keys)) == 2, keys
+    assert all(k in s3.objects for k in keys)
+    assert sorted(expense_step_receipts(client, owner, entity)[str(line.id)]) == ["bill.jpg", "card-slip.jpg"]

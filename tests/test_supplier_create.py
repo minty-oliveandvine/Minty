@@ -1,11 +1,11 @@
-"""Adding a supplier: ``POST /entity/contact/create`` (the Expenses page's "+ Add as a new contact"
-and the Xero mapping pages) and the Petty Cash API's ``POST /suppliers`` - both through
-``blueprints/entity/services/suppliers.py``. Xero is stubbed at its HTTP call.
+"""Adding a supplier: the Petty Cash API's ``POST /suppliers``, through
+``blueprints/entity/services/suppliers.py`` (Flask's ``POST /entity/contact/create`` went with its
+HTML on 2026-10-20). Xero is stubbed at its HTTP call.
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta
+from io import BytesIO
 from types import SimpleNamespace
 
 import char_factories as F
@@ -25,6 +25,7 @@ def _hk_today():
 
 D3 = _hk_today() - timedelta(days=1)
 WEB = "http://localhost:3010"
+JPEG = b"\xff\xd8\xff\xe0fake-jpeg-bytes"
 
 
 @pytest.fixture
@@ -90,103 +91,6 @@ def _synced(app, entity):
         return {r.xero_contact_id: r.name for r in XeroContactSync.query.filter_by(entity_id=entity.id).all()}
 
 
-def _create(client, owner, entity, name="Corner Bakery"):
-    F.login(client, owner)
-    return client.post("/entity/contact/create", data={"name": name, "entity_id": entity.id})
-
-
-# --- the Jinja route ---------------------------------------------------------------------------------
-
-
-def test_a_new_supplier_is_created_in_xero_and_kept_as_a_synced_contact(app, client, shop, xero):
-    """The synced row is the fix (2026-10-14): without it a line saved with the new supplier stored
-    no supplier at all."""
-    owner, entity = shop
-
-    resp = _create(client, owner, entity)
-
-    assert resp.status_code == 201
-    assert resp.get_json() == {"status": "success", "message": "Contact 'Corner Bakery' created successfully.",
-                               "contact_id": "con-new", "name": "Corner Bakery"}
-    assert xero.sent == [{"url": "https://api.xero.com/api.xro/2.0/Contacts", "tenant": ORG,
-                          "json": {"Contacts": [{"Name": "Corner Bakery", "IsCustomer": True, "IsSupplier": False}]}}]
-    assert _synced(app, entity) == {"con-new": "Corner Bakery"}
-
-
-def test_a_line_can_be_saved_with_the_new_supplier(app, client, db, shop, xero, monkeypatch):
-    from models.db import AccountInfo, EntityAccountXero, Report, ShopExpense
-
-    F.install_fake_s3(monkeypatch)
-    owner, entity = shop
-    with app.app_context():
-        acc = AccountInfo(entity_id=entity.id, xero_account_id="acc-0001", xero_code="400", name="Advertising",
-                          type="EXPENSE", status="ACTIVE")
-        db.session.add(acc)
-        db.session.flush()
-        db.session.add(EntityAccountXero(account_id=acc.id, name="Advertising", type="EXPENSE", is_active=True))
-        draft = Report(entity_id=entity.id, transaction_date=D3,
-                       status="draft", created_by=owner.id, opening_balance=0)
-        db.session.add(draft)
-        db.session.commit()
-        day, draft_id = draft.transaction_date, str(draft.id)
-    contact = _create(client, owner, entity).get_json()["contact_id"]
-
-    client.post("/report/expense/add", data={
-        "entity_id": entity.id, "transaction_date": F.iso(day), "item": "Advertising", "amount": "9",
-        "accountId": "acc-0001", "contactId": contact, "files[0][0]": F.receipt()}, content_type="multipart/form-data")
-
-    with app.app_context():
-        [line] = ShopExpense.query.filter_by(report_id=draft_id).all()
-        assert line.contact_name == "Corner Bakery"
-
-
-def test_xero_refusing_is_said_and_nothing_is_kept(app, client, shop, xero):
-    owner, entity = shop
-    xero.status = 400
-
-    resp = _create(client, owner, entity)
-
-    assert resp.status_code == 400
-    assert resp.get_json()["message"] == "I couldn't add that contact to Xero. Mind trying again?"
-    assert _synced(app, entity) == {}
-
-
-def test_a_company_without_xero_cannot_add_one(app, client, db, shop, xero):
-    from models.db import Entity
-
-    owner, entity = shop
-    with app.app_context():
-        db.session.get(Entity, entity.id).xero_org_id = None
-        db.session.commit()
-
-    resp = _create(client, owner, entity)
-
-    assert resp.status_code == 400
-    assert resp.get_json()["message"] == "This entity isn't connected to Xero yet. Could you ask an admin to connect it?"
-    assert xero.sent == []
-
-
-def test_the_expenses_page_sends_its_own_company(app, client, db, shop):
-    """The old page posted ``request.args['entity_id']``, empty on the company address, so
-    "+ Add as a new contact" was refused before reaching Xero (fixed 2026-10-14). The Part 15 page
-    (static/js/pc_expenses.js) posts ``CFG.entityId``, the company the page was drawn for."""
-    from models.db import Report
-
-    owner, entity = shop
-    with app.app_context():
-        draft = Report(entity_id=entity.id, transaction_date=D3,
-                       status="draft", created_by=owner.id, opening_balance=0)
-        db.session.add(draft)
-        db.session.commit()
-        day = draft.transaction_date
-    F.login(client, owner)
-
-    html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/expense",
-                      query_string={"transaction_date": F.iso(day)}).get_data(as_text=True)
-
-    assert re.search(r"entityId:\s*\"" + re.escape(str(entity.id)) + "\"", html), "the page's company"
-
-
 # --- the Petty Cash API ------------------------------------------------------------------------------
 
 
@@ -228,3 +132,73 @@ def test_the_api_says_why_xero_refused(app, client, shop, xero):
 
     assert resp.status_code == 409
     assert resp.get_json()["error"] == "I couldn't add that contact to Xero. Mind trying again?"
+
+
+def test_a_new_supplier_is_created_in_xero_and_kept_as_a_synced_contact(app, client, shop, xero):
+    """The synced row is the fix (2026-10-14): without it a line saved with the new supplier stored
+    no supplier at all."""
+    owner, entity = shop
+
+    resp = _api(app, client, owner, entity, {"name": "Corner Bakery"})
+
+    assert resp.status_code == 201
+    assert xero.sent == [{"url": "https://api.xero.com/api.xro/2.0/Contacts", "tenant": ORG,
+                          "json": {"Contacts": [{"Name": "Corner Bakery", "IsCustomer": True, "IsSupplier": False}]}}]
+    assert _synced(app, entity) == {"con-new": "Corner Bakery"}
+
+
+def test_a_line_can_be_saved_with_the_new_supplier(app, client, db, shop, xero, monkeypatch):
+    from models.db import AccountInfo, EntityAccountXero, Report, ShopExpense
+
+    F.install_fake_s3(monkeypatch)
+    owner, entity = shop
+    with app.app_context():
+        acc = AccountInfo(entity_id=entity.id, xero_account_id="acc-0001", xero_code="400", name="Advertising",
+                          type="EXPENSE", status="ACTIVE")
+        db.session.add(acc)
+        db.session.flush()
+        db.session.add(EntityAccountXero(account_id=acc.id, name="Advertising", type="EXPENSE",
+                                         xero_account_id="acc-0001", is_active=True))
+        draft = Report(entity_id=entity.id, transaction_date=D3,
+                       status="draft", created_by=owner.id, opening_balance=0)
+        db.session.add(draft)
+        db.session.commit()
+        day, draft_id = draft.transaction_date, str(draft.id)
+    contact = _api(app, client, owner, entity, {"name": "Corner Bakery"}).get_json()["id"]
+
+    resp = client.post(
+        f"/api/petty-cash/v1/companies/{entity.id}/reports/expenses/lines",
+        data={"transaction_date": F.iso(day), "amount": "9", "supplier_id": contact, "account_id": "acc-0001",
+              "receipt": (BytesIO(JPEG), "slip.jpg", "image/jpeg")},
+        content_type="multipart/form-data", headers=F.petty_cash_headers(app, owner.id, origin=WEB))
+
+    assert resp.status_code == 201, resp.get_json()
+    with app.app_context():
+        [line] = ShopExpense.query.filter_by(report_id=draft_id).all()
+        assert line.contact_name == "Corner Bakery"
+
+
+def test_xero_refusing_is_said_and_nothing_is_kept(app, client, shop, xero):
+    owner, entity = shop
+    xero.status = 400
+
+    resp = _api(app, client, owner, entity, {"name": "Corner Bakery"})
+
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "I couldn't add that contact to Xero. Mind trying again?"
+    assert _synced(app, entity) == {}
+
+
+def test_a_company_without_xero_cannot_add_one(app, client, db, shop, xero):
+    from models.db import Entity
+
+    owner, entity = shop
+    with app.app_context():
+        db.session.get(Entity, entity.id).xero_org_id = None
+        db.session.commit()
+
+    resp = _api(app, client, owner, entity, {"name": "Corner Bakery"})
+
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "This entity isn't connected to Xero yet. Could you ask an admin to connect it?"
+    assert xero.sent == []

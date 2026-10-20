@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import types
 import uuid
-from pathlib import Path
 
 import pytest
 from werkzeug.security import generate_password_hash
@@ -124,22 +123,3 @@ def test_my_profile_returns_system_role_and_memberships(app, db_session, monkeyp
             "approved": True,
         }
     ]
-
-
-@pytest.mark.parametrize(
-    ("template_name", "expected_system_role_reference"),
-    [
-        ("admin.html", "current_user.system_role"),
-        ("admin_dashboard.html", "user.system_role"),
-        ("report_detail.html", "current_user.system_role"),
-    ],
-)
-def test_templates_depend_on_system_role_not_legacy_role(
-    template_name, expected_system_role_reference
-):
-    template_path = Path(__file__).resolve().parents[1] / "templates" / template_name
-    contents = template_path.read_text(encoding="utf-8")
-
-    assert expected_system_role_reference in contents
-    assert "current_user.role" not in contents
-    assert "user.role" not in contents

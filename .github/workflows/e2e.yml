@@ -18,15 +18,15 @@ on:
         type: choice
         default: minty-web
         options:
+          # Minty's own Playwright suite went with Flask's HTML frontend (2026-10-20)
           - minty-web
-          - Minty
           - minty-payment-request-web
       ref:
         description: "The branch of the other six repos"
         type: string
         default: development
       spec:
-        description: "Optional Playwright filter, e.g. e2e/01_login.spec.ts"
+        description: "Optional Playwright filter, e.g. e2e/09_terms.spec.ts"
         type: string
         default: ""
   schedule:

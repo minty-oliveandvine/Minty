@@ -114,7 +114,10 @@ The allow-list is keyed on **endpoint names**. Load-bearing:
   devtools; they still cannot **enter** any company, because every other entity route stays gated
   here.
 - **`auth.logout`** — someone who refuses must be able to leave.
-- **the login/OTP endpoints** — or nobody can authenticate to reach the panel.
+- **the sign-in endpoints** (`auth.home`, `auth.register`, `auth.auth_notices` and the three
+  `/auth/email/*` routes) — or nobody can authenticate to reach the panel. `auth.login`,
+  `auth.reset_request`, `auth.reset_token` and `auth.no_permission` left the list on 2026-10-20
+  with their routes.
 - `legal.current`, `legal.invite_terms_status`, `legal.hub_terms_status`,
   `legal.hub_terms_accept` — read or posted while blocked, two of them before anyone is signed
   in. `legal.user_consents` stays **gated**, deliberately.
@@ -124,7 +127,7 @@ minty-web's gate fails open the same way — including when its document and thi
 disagree, which is the one case where showing nobody a document is better than showing the wrong
 one.
 
-An acceptance given in minty-web is honoured here on the person's next Flask page: the gate falls
+An acceptance given in minty-web is honoured here on the person's next Flask request: the gate falls
 back to the database whenever its session cache has no answer. That cache stores the **version**,
 not a flag, so a Terms revamp invalidates every session by itself.
 
@@ -137,9 +140,7 @@ revamp path, failing open), `tests/test_hub_terms.py` (minty-web's two routes, t
 the `document_hash` compare), `tests/test_terms_consent.py` (the server-side hash, idempotency,
 never committing), `tests/test_terms_signup_consent.py` (account and consent in one transaction),
 `tests/test_terms_consent_history_api.py`, and `tests/test_url_security.py`'s deleted-routes
-list. In the browser `e2e/01_login.spec.ts` (first sign-in shows minty-web's panel; it is never
-accepted on that account) — which needs minty-web up — and minty-web's `e2e/09_terms.spec.ts`,
-which shows the real document.
+list. In the browser, minty-web's `e2e/09_terms.spec.ts`, which shows the real document.
 
 The documents' own tests are minty-web's: `lib/legal/__tests__/{registry,render,serverOnly}.test.ts`
 and `components/ui/__tests__/LegalDocumentPage.test.tsx`.

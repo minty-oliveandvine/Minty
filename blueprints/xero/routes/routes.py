@@ -2,7 +2,7 @@ import json
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import quote, unquote
 
 import requests
@@ -1041,7 +1041,7 @@ def xero_callback():
                                 if from_onboarding:
                                     return _onboarding_xero_return(False)
                                 return redirect(
-                                    url_for("entity.entity_create_success"))
+                                    url_for("entity.entity_list"))
                             else:
                                 entity = _resolve_connect_entity(
                                     entity_id,
@@ -1116,7 +1116,7 @@ def xero_callback():
                                     if from_onboarding:
                                         return _onboarding_xero_return(False)
                                     return redirect(
-                                        url_for("entity.entity_create_success"))
+                                        url_for("entity.entity_list"))
                                 # ``user`` is already the user resolved from the
                                 # Xero id_token email above. Do NOT re-fetch via
                                 # current_user: /callback has no @login_required
@@ -1203,7 +1203,7 @@ def xero_callback():
                             if from_onboarding:
                                 return _onboarding_xero_return(False)
                             return redirect(
-                                url_for("entity.entity_create_success"))
+                                url_for("entity.entity_list"))
                 except Exception as error:
                     flash(
                         "I couldn't connect that to Xero. Mind trying again?", "danger")
@@ -1211,7 +1211,7 @@ def xero_callback():
                         f"There is an error connecting to xero: {error}")
                     if from_onboarding:
                         return _onboarding_xero_return(False)
-                    return redirect(url_for("entity.entity_create_success"))
+                    return redirect(url_for("entity.entity_list"))
         else:
             if from_onboarding:
                 # Mid-onboarding the user may cancel/deny and retry or skip;
@@ -1796,7 +1796,6 @@ def update_bank_transaction(entity_id):
     if not date_str:
         return jsonify({"status": "error", "message": "Missing date"}), 400
     date = datetime.strptime(date_str, "%Y-%m-%d").date()
-    redirect_date = date + timedelta(days=1)
 
     # Submitted only — this compares against the deposit previously sent to
     # Xero, which a draft has never done.
@@ -1868,7 +1867,6 @@ def update_bank_transaction(entity_id):
                 "status": "success",
                 "message": "Bank transaction updated successfully",
                 "data": response.json(),
-                "redirect_url": url_for("report.report_opening", entity_id=entity_id, transaction_date=redirect_date),
             }),
         200,
     )

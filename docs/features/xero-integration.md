@@ -1,11 +1,13 @@
 # Xero integration — connecting a company, syncing its books, publishing the day
 
 Two things share the word "Xero" and must not be confused: **signing in with Xero** (an
-identity, [authentication.md](authentication.md) §2.3) and **connecting a company to a
+identity, [authentication.md](authentication.md) §2.2) and **connecting a company to a
 Xero organisation** (this document). Code: `blueprints/xero/` (routes, `services/publish.py`,
 `services/integration.py`, `services/settings.py`, `services/publish_record.py`),
 `services/auth/token_service.py` (tokens), `blueprints/entity/services/settings.py` (the
-sync), the Entity & Integration tab (minty-web's since phase 2, over `entity/routes/hub_settings.py`) and `report/submitted.html`.
+sync). The screens are the Next apps': the Entity & Integration tab (minty-web's, over
+`entity/routes/hub_settings.py`) and the Daily Report's publish (minty-petty-cash-web's, over
+minty-petty-cash-api, which forwards it to `POST /api/internal/xero/publish`).
 
 ## 1. Connecting
 
@@ -32,8 +34,11 @@ does not survive the round-trip. `GET /callback`:
    (+ `entity_account_xero` for the expense picker) and the bill account codes →
    `entity_bill_account_xero` (minty-payment-request-api's table; Minty writes it, there is no FK
    across that boundary by design). `GET /api/entity/<id>/xero-sync-status` reports the
-   sync's progress for the settings page; the cached rows are also what the pages use when
-   Xero is down.
+   sync's progress; the cached rows are also what the apps read when Xero is down.
+
+A connect failure outside onboarding goes back to the company list (`entity.entity_list`, which
+hands over to minty-web with the message as a notice; it was `/entity/success` until that page
+was deleted on 2026-10-20).
 
 ### 1.1 One organisation, one company — and the move (2026-10-09)
 
@@ -122,7 +127,7 @@ normal traffic. Details and the reasons in [authentication.md](authentication.md
 petty cash (the cash-on-hand bank account), the bank account for deposits, the cash-sale
 revenue account, the discrepancy account and its bank account, the director's account for
 floats; and three contacts — the cash-sale customer, the director, the discrepancy
-contact. Petty Cash Settings (`/entity/<co>/settings/petty-cash`) offers the synced rows; `check_entity_xero_settings_complete` refuses a publish while any
+contact. Petty Cash Settings (minty-petty-cash-web; [petty-cash-settings.md](petty-cash-settings.md)) offers the synced rows; `check_entity_xero_settings_complete` refuses a publish while any
 is missing. The seed (`scripts/e2e_seed.py`) writes placeholders for an unconnected shop
 and leaves a connected shop's real mapping alone.
 
@@ -134,17 +139,15 @@ only the ticked codes. The mapping dropdowns list only ACTIVE rows, so the Direc
 accounts and any unticked Discrepancy code vanished whenever the background re-sync could not
 run (disconnected, token expired), and the save then said "Please select: Discrepancy account
 code". The mapping lists also always include each saved choice
-(`xero_mapping_form_context.py`), and the page logs a console error if a saved choice still
-fails to land in its field. Publish checks `status` only, so an unticked code still publishes.
+(`xero_mapping_form_context.py`). Publish checks `status` only, so an unticked code still publishes.
 
 ## 4. Publishing a report
 
-`POST /report/submitted/publish_to_xero?entity_id=&report_id=` (`REPORT_PUBLISH` =
-accountant and up), and the Petty Cash API's `POST /reports/<id>/publish` - both through
-`xero/services/publish_start.py::start_publish` since 2026-10-16
-(`tests/test_report_publish_state.py`; fixed on the way: a draft is refused - with a report id
-the route took any report - and a start that fails after the lock always leaves the report
-`failed`, where the reset used to need the id from the address):
+`POST /api/internal/xero/publish` (minty-petty-cash-api's forward) and the bearer API's
+`POST /reports/<id>/publish` (`REPORT_PUBLISH` = accountant and up) - both through
+`xero/services/publish_start.py::start_publish` (`tests/test_report_publish_state.py`; a draft is
+refused, and a start that fails after the lock always leaves the report `failed`). Flask's session
+route `POST /report/submitted/publish_to_xero` went with its pages on 2026-10-20:
 
 1. resolves the token, checks the mapping is complete, re-syncs a stale `status`;
 2. refuses expense lines that point at **system accounts** (the mapped control accounts;
@@ -152,9 +155,8 @@ the route took any report - and a start that fails after the lock always leaves 
 3. takes the report's row lock — `SELECT … FOR UPDATE NOWAIT` **`OF report`** (the creator
    and their token are outer-joined by eager loads; Postgres cannot lock their side) — a
    second click while it runs gets 409; sets `publishing_status = publishing`;
-4. answers **202** and runs `process_xero_integration_background` in a thread; the page
-   polls `GET /api/report/<id>/publishing_status` (`publishing_status`,
-   `xero_integrated_yes`, `failure_reasons`).
+4. answers **202** and runs `process_xero_integration_background` in a thread; the app
+   polls the API's `GET /reports/<id>/publishing-status` ([petty-cash-api.md](petty-cash-api.md)).
 
 The worker (`xero_integrated_module`) posts five modules, each `(succeeded, failed)`:
 
@@ -178,8 +180,8 @@ exists but nothing calls it on this side — the lock-date check is minty-paymen
 bill publishes; a report dated inside a locked period is refused by Xero itself.)
 
 A report that has been to Xero and is then edited comes back to `submitted` with
-`xero_integrated` cleared; its submitted page shows the **republish warning** (a second
-publish would duplicate what the record no longer covers). A never-published report gets
+`xero_integrated` cleared; the app shows the **republish warning** for it (`was_published`: a
+second publish would duplicate what the record no longer covers). A never-published report gets
 the plain button — `publishing_status` is NOT NULL and `unpublished` is that state.
 
 ## 5. Other endpoints
@@ -194,13 +196,14 @@ minty-payment-request-api calls, JWT-authenticated — `blueprints/entity/routes
 
 ## 6. Tests
 
-`tests/test_xero_scopes.py`, `tests/test_char_report_lifecycle.py` (the publish hand-off
-with Xero stubbed, the lock, the expense-line lookup by Xero ids), `tests/test_char_xero_sync.py`
+`tests/test_xero_scopes.py`, `tests/test_report_publish_state.py` and
+`tests/test_petty_cash_internal_publish.py` (the publish start with Xero stubbed, the lock),
+`tests/test_char_xero_sync.py`
 and `tests/test_char_xero_tokens.py` (the cache and the token rules), `tests/test_xero_report_republish.py`,
 `tests/test_xero_org_switch_invalidation.py`, `tests/test_xero_entity_connect_race.py`,
 `tests/test_xero_contact_sync_no_mass_delete.py` (the republish, org-switch and sync
 guards), `tests/test_xero_conflict_guard.py` with `tests/test_hub_company_settings.py` and
-`tests/test_char_entities.py` (one org = one company, and the move — §1.1),
-and — the only thing that talks to Xero — `e2e/04_xero_publish.spec.ts` with
-`E2E_XERO=1` against a shop linked to a Demo Company (what it found on 2026-09-18 is in
+`tests/test_char_entities.py` (one org = one company, and the move — §1.1). Nothing in this
+repo talks to Xero for real any more: the browser publish spec (`e2e/04_xero_publish.spec.ts`,
+`E2E_XERO=1`) drove Flask's pages and went with them (what it found on 2026-09-18 is in
 `docs/modernisation/modernisation_plan.md`, Phase E).

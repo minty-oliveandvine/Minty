@@ -205,11 +205,11 @@ def test_the_default_origin_is_the_local_app(monkeypatch):
     assert bearer_api.petty_cash_web_origin() == "http://localhost:3010"
 
 
-# --- Flask's own Petty Cash pages hand over to the app ------------------------------------------
-# The older front ends (minty-web, payment-request-web, onboarding-web, every branch) still send
-# "Petty Cash" to Flask's dashboard or report history, through /enter. Where the app is set, those
-# two pages go on through /handoff/petty-cash-web, so Flask serves no Petty Cash page; unset, they
-# stay Flask's, as the sidebar does (blueprints/shared/sidebar.py's _petty_cash_links).
+# --- Flask's old Petty Cash addresses hand over to the app --------------------------------------
+# The older front ends (minty-web, payment-request-web, onboarding-web, every branch), the emails
+# and Xero's callback still send "Petty Cash" to Flask's dashboard, report history or settings
+# address, through /enter. Each goes on through /handoff/petty-cash-web: Flask has had no Petty
+# Cash page since 2026-10-20.
 
 
 def _handoff_next(resp, entity_id):
@@ -265,14 +265,33 @@ def test_enter_with_no_next_ends_in_the_app(app, client, shop):
     assert nxt == f"/entity/{_ref(client, entity.id)}/petty-cash"
 
 
-def test_without_the_app_flasks_pages_stay(client, shop, monkeypatch):
+def test_without_the_variable_the_pages_still_hand_over(client, shop, monkeypatch):
+    """Flask draws no Petty Cash page any more (2026-10-20): unset, the app is the local one."""
     monkeypatch.delenv("PETTY_CASH_WEB_URL", raising=False)
     F.login(client, shop["owner"])
     base = F.co(client, shop["entity"].id)
 
-    for path in ("/petty-cash", "/petty-cash/reports"):
+    for path in ("/petty-cash", "/petty-cash/reports", "/settings/petty-cash"):
         resp = client.get(base + path)
-        assert resp.status_code == 200, (path, resp.status_code, resp.headers.get("Location"))
+        assert resp.status_code == 302, (path, resp.status_code)
+        assert urlsplit(resp.headers["Location"]).path == "/handoff/petty-cash-web", path
+
+
+def test_flasks_petty_cash_settings_hands_over_to_the_apps_settings(client, shop):
+    F.login(client, shop["owner"])
+    entity = shop["entity"]
+
+    nxt = _handoff_next(client.get(F.co(client, entity.id) + "/settings/petty-cash"), entity.id)
+
+    assert nxt == f"/entity/{_ref(client, entity.id)}/settings/petty-cash"
+
+
+def test_an_old_share_address_opens_the_apps_share_page(client):
+    """``/Minty_Report/<initials>/<date>/<secret>/`` was Flask's page; the app's page reads the link."""
+    resp = client.get("/Minty_Report/VC/13_Oct_2026/abcDEF123_-xyz/")
+
+    assert resp.status_code == 308
+    assert resp.headers["Location"] == f"{WEB}/share/VC/13_Oct_2026/abcDEF123_-xyz"
 
 
 def test_a_stranger_is_not_handed_over(client, shop):

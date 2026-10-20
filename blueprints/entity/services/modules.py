@@ -68,25 +68,6 @@ DEFAULT_MODULE_STATE: dict[str, bool] = {
     MODULE_BILL: False,
 }
 
-# Presentation metadata that isn't stored in the catalog table: marketing
-# assets, pricing copy, and the "learn more" link. ``name`` and ``description``
-# are NOT here — those come from entity_function (function_name / description).
-# Keyed by canonical module code; keep in sync with MODULE_CODES when a new
-# module is introduced.
-# Per-module presentation metadata that has no source of truth elsewhere: the
-# card illustration and the "Learn more" link. Prices and labels are NOT here —
-# amounts come from billing_plan (services.catalog) and labels from entity_function
-# (EntityFunction.function_name).
-MODULE_DISPLAY: dict[str, dict] = {
-    MODULE_PETTY_CASH: {
-        "image": "img/cash_reg.webp",
-        "learn_more": "https://youtu.be/kMs85hnvwFw?si=4Yt6WHeFIYVkNLPK",
-    },
-    MODULE_BILL: {
-        "image": "img/payment-icon.png",
-        "learn_more": "https://youtu.be/v7G6gaGO0V0?si=P7-aWHPa9p4jDlHS",
-    },
-}
 
 def _enabled_state(entity_id: str) -> dict[str, bool]:
     """Resolve each canonical module's on/off state for an entity.
@@ -163,7 +144,7 @@ def module_display_names(codes) -> dict[str, str]:
     """Human labels for module codes, from the catalog — ``{code: name}``.
 
     ``entity_function.function_name`` is the source of truth for what a module is
-    called in the app (MODULE_DISPLAY deliberately holds no names), so the label is
+    called in the app, so the label is
     read rather than hardcoded. Codes with no catalog row fall back to the code, the
     same last resort ``get_module_cards`` uses.
     """
@@ -185,9 +166,6 @@ def module_display_names(codes) -> dict[str, str]:
     return {code: (by_code.get(code) or code) for code in codes}
 
 
-#: Session key holding the entity ids whose notice has already been shown this login.
-NOTICE_SEEN_SESSION_KEY = "subscription_notice_seen"
-
 #: Session key holding an id for the CURRENT sign-in, rewritten on every login.
 #:
 #: Exists so that "once per login" can mean the same thing in the Module 2 frontend,
@@ -200,31 +178,6 @@ NOTICE_SEEN_SESSION_KEY = "subscription_notice_seen"
 #: It is an opaque random value, not a session identifier anyone can authenticate
 #: with — it only ever answers "is this the same sign-in as before".
 LOGIN_SID_SESSION_KEY = "login_sid"
-
-
-def claim_subscription_notice(session, entity_id: str) -> bool:
-    """Whether the dashboard shows the subscription notice now - and if so, mark it shown.
-
-    Once per entity per login: not once per page view, and not once forever - a user who
-    comes back tomorrow should be told if it is still broken. Consuming rather than
-    reading is what keeps the cost bearable: the notice is fetched from the subscription
-    API only when this returns True.
-
-    Takes the session as a parameter so it is testable with a plain dict.
-    """
-    if not entity_id:
-        return False
-    seen = session.get(NOTICE_SEEN_SESSION_KEY) or []
-    if str(entity_id) in seen:
-        return False
-    # Reassign rather than mutate in place: Flask's session only marks itself dirty on
-    # __setitem__, so appending to the existing list would not persist.
-    session[NOTICE_SEEN_SESSION_KEY] = [*seen, str(entity_id)]
-    return True
-
-
-
-
 
 
 def apply_module_selection(

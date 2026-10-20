@@ -81,6 +81,16 @@ def _reload(db_session, user_id):
     return db_session.session.get(User, user_id)
 
 
+def _sign_in(app, client, user_id):
+    """Sign in the way every sign-in ends since the password page went (2026-10-20): the
+    email-code hand-off, whose ``login_user`` fires the signal presence listens to."""
+    from blueprints.auth.routes.email_auth import _mint_handoff_url
+
+    with app.test_request_context():
+        url = _mint_handoff_url(user_id)
+    return client.get(url, follow_redirects=False)
+
+
 def _signed_in_ids(db_session):
     from models.db import User
     from services.user_presence import is_signed_in_clause
@@ -99,11 +109,7 @@ def test_login_puts_user_on_the_signed_in_list(app, client, db_session):
     user_id = _make_user(db_session).id
     assert user_id not in _signed_in_ids(db_session)
 
-    resp = client.post(
-        "/login",
-        data={"username": "presence.user", "password": "password123"},
-        follow_redirects=False,
-    )
+    resp = _sign_in(app, client, user_id)
     assert resp.status_code == 302
 
     stored = _reload(db_session, user_id)
@@ -114,11 +120,7 @@ def test_login_puts_user_on_the_signed_in_list(app, client, db_session):
 
 def test_logout_takes_user_off_the_signed_in_list(app, client, db_session):
     user_id = _make_user(db_session).id
-    client.post(
-        "/login",
-        data={"username": "presence.user", "password": "password123"},
-        follow_redirects=False,
-    )
+    _sign_in(app, client, user_id)
     assert user_id in _signed_in_ids(db_session)
 
     client.get("/logout", follow_redirects=False)
@@ -133,13 +135,11 @@ def test_logout_takes_user_off_the_signed_in_list(app, client, db_session):
 
 def test_logging_back_in_returns_user_to_the_list(app, client, db_session):
     user_id = _make_user(db_session).id
-    creds = {"username": "presence.user", "password": "password123"}
-
-    client.post("/login", data=creds, follow_redirects=False)
+    _sign_in(app, client, user_id)
     client.get("/logout", follow_redirects=False)
     assert user_id not in _signed_in_ids(db_session)
 
-    client.post("/login", data=creds, follow_redirects=False)
+    _sign_in(app, client, user_id)
     assert user_id in _signed_in_ids(db_session)
 
 

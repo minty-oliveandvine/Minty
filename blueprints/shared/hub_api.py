@@ -25,8 +25,7 @@ copied into it on 2026-09-30 - billing-frontend, whose My Profile reads and save
 ``/api/me/profile`` (and minty-petty-cash-web, through the same shared sidebar). A browser
 allows one origin per response, so the request's own ``Origin`` is echoed when it is one of
 them, and minty-web's named otherwise (the browser then refuses the stranger, which is the
-point). Flask's own pages call these routes
-same-origin with the token ``GET /me/sidebar-token`` hands them - no CORS involved.
+point).
 """
 
 from __future__ import annotations

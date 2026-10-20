@@ -1,7 +1,9 @@
 """Editing a SUBMITTED report without touching its balances - the Daily Report's three edits
-(``report/routes/api.py``: ``/report/<id>/edit/discrepancy-reason``, ``/report/<id>/edit/withdrawal``
-and ``/report/expense/edit/<expense id>``) - before the logic moves into a service that the Jinja
-pages and the Petty Cash API share (``report/services/report_edits.py``).
+(``report/services/report_edits.py``), pinned before the logic moved into that service. Driven
+through the Jinja routes (``/report/<id>/edit/discrepancy-reason``, ``/report/<id>/edit/withdrawal``,
+``/report/expense/edit/<expense id>``) until Flask's HTML frontend was deleted (2026-10-20); now
+through the Petty Cash API's ``PUT /reports/<id>/difference-reason``, ``PUT /reports/<id>/withdrawal``
+and ``PATCH /reports/<id>/expense-lines/<line id>``, which answer a refusal ``{error}``.
 
 Characterisation, green before and after the extraction; tests marked FIXED pin what it changed
 deliberately (they failed before it).
@@ -46,24 +48,33 @@ def _report(app, report_id):
                 "status": getattr(row.status, "value", row.status), "in_xero": row.xero_integrated}
 
 
-def _reason(client, owner, report_id, reason):
-    F.login(client, owner)
-    return client.post(f"/report/{report_id}/edit/discrepancy-reason", data={"discrepancy_reason": reason})
+def _url(entity, report_id, tail=""):
+    return f"/api/petty-cash/v1/companies/{entity.id}/reports/{report_id}{tail}"
 
 
-def _withdrawal(client, owner, report_id, kind):
-    F.login(client, owner)
-    return client.post(f"/report/{report_id}/edit/withdrawal", data={"withdrawal_type": kind})
+def _headers(client, who):
+    return F.petty_cash_headers(client.application, who.id)
 
 
-def _edit_line(client, owner, line_id, **form):
-    F.login(client, owner)
+def _reason(client, who, entity, report_id, reason):
+    return client.put(_url(entity, report_id, "/difference-reason"), json={"reason": reason},
+                      headers=_headers(client, who))
+
+
+def _withdrawal(client, who, entity, report_id, kind):
+    return client.put(_url(entity, report_id, "/withdrawal"), json={"withdrawal_type": kind},
+                      headers=_headers(client, who))
+
+
+def _edit_line(client, who, entity, report_id, line_id, **form):
+    """``files``: one ``(name, bytes)`` - the API takes one receipt per line."""
     files = form.pop("files", None)
     data = dict(form)
     if files:
-        for i, (name, body) in enumerate(files):
-            data[f"files[0][{i}]"] = (io.BytesIO(body), name)
-    return client.post(f"/report/expense/edit/{line_id}", data=data, content_type="multipart/form-data")
+        [(name, body)] = files
+        data["receipt"] = (io.BytesIO(body), name)
+    return client.patch(_url(entity, report_id, f"/expense-lines/{line_id}"), data=data,
+                        content_type="multipart/form-data", headers=_headers(client, who))
 
 
 # --- the difference reason ----------------------------------------------------------------------
@@ -75,17 +86,16 @@ def test_the_reason_is_saved_and_the_report_leaves_xero(app, client, db, shop): 
                               discrepancy_reason="old", xero_integrated=True, publishing_status="completed",
                               status="published")
 
-    resp = _reason(client, owner, report_id, "  recounted  ")
+    resp = _reason(client, owner, entity, report_id, "  recounted  ")
 
     assert resp.status_code == 200, resp.get_json()
-    assert resp.get_json()["discrepancy_reason"] == "recounted"
     assert _report(app, report_id) == {"reason": "recounted", "withdrawal": None, "status": "submitted", "in_xero": False}
 
 
 def test_no_difference_may_have_no_reason(app, client, db, shop):  # noqa: F811
     owner, entity = shop
     report_id, _ = _submitted(app, db, entity, owner, discrepancy_reason="note")
-    assert _reason(client, owner, report_id, "").status_code == 200
+    assert _reason(client, owner, entity, report_id, "").status_code == 200
     assert _report(app, report_id)["reason"] == ""
 
 
@@ -96,10 +106,10 @@ def test_fixed_a_difference_keeps_a_reason(app, client, db, shop):  # noqa: F811
     report_id, _ = _submitted(app, db, entity, owner, discrepancy_amount=-5, discrepancy_type="short",
                               discrepancy_reason="old")
 
-    resp = _reason(client, owner, report_id, "  ")
+    resp = _reason(client, owner, entity, report_id, "  ")
 
     assert resp.status_code == 422
-    assert resp.get_json()["message"] == "The cash was short, so the reason is still needed. Add the reason to save it."
+    assert resp.get_json()["error"] == "The cash was short, so the reason is still needed. Add the reason to save it."
     assert _report(app, report_id)["reason"] == "old"
 
 
@@ -108,10 +118,10 @@ def test_fixed_a_long_reason_is_refused_not_cut(app, client, db, shop):  # noqa:
     owner, entity = shop
     report_id, _ = _submitted(app, db, entity, owner, discrepancy_reason="old")
 
-    resp = _reason(client, owner, report_id, "x" * 301)
+    resp = _reason(client, owner, entity, report_id, "x" * 301)
 
     assert resp.status_code == 422
-    assert resp.get_json()["message"] == "Keep the reason to 300 characters or fewer."
+    assert resp.get_json()["error"] == "Keep the reason to 300 characters or fewer."
     assert _report(app, report_id)["reason"] == "old"
 
 
@@ -122,11 +132,11 @@ def test_the_withdrawal_source_is_saved(app, client, db, shop):  # noqa: F811
     owner, entity = shop
     report_id, _ = _submitted(app, db, entity, owner, cash_addition=20, cash_addition_type="personal")
 
-    resp = _withdrawal(client, owner, report_id, "company")
+    resp = _withdrawal(client, owner, entity, report_id, "company")
 
     assert resp.status_code == 200, resp.get_json()
     assert _report(app, report_id)["withdrawal"] == "company"
-    assert _withdrawal(client, owner, report_id, "bank").status_code == 400
+    assert _withdrawal(client, owner, entity, report_id, "bank").status_code == 400
 
 
 # --- a submitted report's expense line ----------------------------------------------------------
@@ -151,7 +161,7 @@ def test_a_line_s_details_change_and_its_amount_does_not(app, client, db, shop):
     owner, entity = shop
     report_id, line_id = _submitted(app, db, entity, owner, xero_integrated=True, publishing_status="completed")
 
-    resp = _edit_line(client, owner, line_id, remarks="Posters", contactId="con-0002", contactName="Taxi Co")
+    resp = _edit_line(client, owner, entity, report_id, line_id, remarks="Posters", supplier_id="con-0002")
 
     assert resp.status_code == 200, resp.get_json()
     line = _lines(app, report_id)[0]
@@ -166,25 +176,25 @@ def test_fixed_a_new_account_renames_the_line(app, client, db, shop):  # noqa: F
     _add_account(app, db, entity)
     report_id, line_id = _submitted(app, db, entity, owner)
 
-    resp = _edit_line(client, owner, line_id, accountId="acc-0003", account_code="404")
+    resp = _edit_line(client, owner, entity, report_id, line_id, account_id="acc-0003")
 
     assert resp.status_code == 200, resp.get_json()
     assert (_lines(app, report_id)[0]["item"], _lines(app, report_id)[0]["account"]) == ("Bank Fees", "404")
 
 
 @pytest.mark.parametrize("form, message", [
-    ({"accountId": "acc-elsewhere"}, "Choose an account code from the list."),
-    ({"accountId": "acc-0002"}, "Choose an account code from the list."),  # switched off for Petty Cash
-    ({"contactId": "con-elsewhere", "contactName": "Someone"}, "Choose a supplier from the list."),
+    ({"account_id": "acc-elsewhere"}, "Choose an account code from the list."),
+    ({"account_id": "acc-0002"}, "Choose an account code from the list."),  # switched off for Petty Cash
+    ({"supplier_id": "con-elsewhere"}, "Choose a supplier from the list."),
 ])
 def test_fixed_an_account_or_supplier_must_be_the_company_s(app, client, db, shop, form, message):  # noqa: F811
     """FIXED: any id the browser sent was stored."""
     owner, entity = shop
     report_id, line_id = _submitted(app, db, entity, owner)
 
-    resp = _edit_line(client, owner, line_id, **form)
+    resp = _edit_line(client, owner, entity, report_id, line_id, **form)
 
-    assert resp.status_code == 422 and resp.get_json()["message"] == message
+    assert resp.status_code == 422 and resp.get_json()["error"] == message
     assert _lines(app, report_id)[0]["account"] == "400" and _lines(app, report_id)[0]["contact"] == "ABC Supplies"
 
 
@@ -196,11 +206,11 @@ def test_fixed_a_new_receipt_is_checked_and_the_old_file_goes(app, client, db, s
     old = f"expenses/{report_id}/OLD_RECEIPT.png"
     s3.objects[old] = PNG
 
-    refused = _edit_line(client, owner, line_id, files=[("notes.txt", b"just text")])
-    assert refused.status_code == 422 and refused.get_json()["message"] == "Attach a PDF, JPEG or PNG file."
+    refused = _edit_line(client, owner, entity, report_id, line_id, files=[("notes.txt", b"just text")])
+    assert refused.status_code == 422 and refused.get_json()["error"] == "Attach a PDF, JPEG or PNG file."
     assert _lines(app, report_id)[0]["keys"] == [old]
 
-    done = _edit_line(client, owner, line_id, files=[("new.png", PNG)])
+    done = _edit_line(client, owner, entity, report_id, line_id, files=[("new.png", PNG)])
     assert done.status_code == 200, done.get_json()
     keys = _lines(app, report_id)[0]["keys"]
     assert keys != [old] and keys[0] in s3.objects
@@ -220,9 +230,9 @@ def test_fixed_a_draft_or_a_report_being_published_is_not_edited_here(app, clien
     owner, entity = shop
     report_id, line_id = _submitted(app, db, entity, owner, discrepancy_reason="old", **fields)
 
-    for resp in (_reason(client, owner, report_id, "new"), _withdrawal(client, owner, report_id, "company"),
-                 _edit_line(client, owner, line_id, remarks="Posters")):
-        assert resp.status_code == 409 and resp.get_json()["message"] == message
+    for resp in (_reason(client, owner, entity, report_id, "new"), _withdrawal(client, owner, entity, report_id, "company"),
+                 _edit_line(client, owner, entity, report_id, line_id, remarks="Posters")):
+        assert resp.status_code == 409 and resp.get_json()["error"] == message
     assert _report(app, report_id)["reason"] == "old" and _lines(app, report_id)[0]["remarks"] == "Flyers"
 
 
@@ -236,5 +246,7 @@ def test_someone_without_the_right_is_refused(app, client, db, shop):  # noqa: F
         db.session.add(UserEntity(user_id=viewer.id, entity_id=entity.id, role="entity_base", approved=True))
         db.session.commit()
 
-    assert _reason(client, viewer, report_id, "new").status_code == 403
-    assert _edit_line(client, viewer, line_id, remarks="Posters").status_code == 403
+    # The API does not show a report to someone who may not see it: 404, as for one that is not there.
+    assert _reason(client, viewer, entity, report_id, "new").status_code == 404
+    assert _edit_line(client, viewer, entity, report_id, line_id, remarks="Posters").status_code == 404
+    assert _report(app, report_id)["reason"] is None and _lines(app, report_id)[0]["remarks"] == "Flyers"

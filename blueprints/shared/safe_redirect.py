@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from flask import request
 
 
 def safe_internal_path(candidate: str | None) -> str | None:
@@ -41,14 +40,3 @@ def safe_internal_path(candidate: str | None) -> str | None:
 def safe_next(candidate: str | None, default: str) -> str:
     """``safe_internal_path(candidate)``, or ``default`` when it is refused."""
     return safe_internal_path((candidate or "").strip()) or default
-
-
-def safe_referrer(default: str) -> str:
-    """Back where the person came from: the Referer's path when it is this site, else
-    ``default``. The header is the browser's to fill in, so another site's address -
-    or a missing one, which ``Referrer-Policy`` can cause - falls back."""
-    parts = urlsplit(request.referrer or "")
-    if parts.netloc != request.host:
-        return default
-    path = parts.path + (f"?{parts.query}" if parts.query else "")
-    return safe_next(path, default)

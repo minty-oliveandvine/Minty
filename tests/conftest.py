@@ -35,13 +35,6 @@ except RuntimeError:
 # collection start, makes the first registry complete whatever the test modules import.
 import models.db  # noqa: E402,F401
 
-# Two route-unit modules stub pandas with ``sys.modules.setdefault("pandas", SimpleNamespace(...))``
-# at import time. Collected before anything imported the real library, the stub then serves
-# the whole session and the CSV export 500s ("no attribute 'Index'") - the order-dependence
-# test_history_csv_lists_the_days_movements used to show. Importing pandas here first makes
-# their setdefault a no-op.
-import pandas  # noqa: E402,F401
-
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TESTS_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -300,7 +293,6 @@ def app(built_database) -> Iterator:
         "S3_URL": "https://dummy-key:dummy-secret@s3.us-east-1.backblazeb2.com/dummy-bucket",
         "XERO_CLIENT_ID": "dummy-xero-client-id",
         "XERO_CLIENT_SECRET": "dummy-xero-secret",
-        "SPIRE_KEY": "dummy-spire-key",
         "SMTP_URL": "smtp://localhost:587",
         "MAIL_FROM": "noreply@minty.test",
         # both empty = config.py's localhost:8000 default (Flask's own address, and its alias)
@@ -351,17 +343,6 @@ def client(app):
     # unwinds out of order at teardown ("Working outside of application context"). Tests
     # that need the session use ``client.session_transaction()``.
     return app.test_client()
-
-
-@pytest.fixture
-def xero_live(monkeypatch):
-    """Petty Cash Settings treats the company as live on Xero (``_xero_live``) without a Xero
-    call, so its Xero-fed cards and the account-code rule are on. Looked up at test time: this
-    conftest re-imports ``blueprints.*`` per app, so a top-level import would patch a stale module."""
-    import importlib
-
-    routes = importlib.import_module("blueprints.entity.routes.settings")
-    monkeypatch.setattr(routes, "_xero_live", lambda org: True)
 
 
 @pytest.fixture

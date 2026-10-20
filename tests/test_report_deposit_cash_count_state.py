@@ -1,23 +1,17 @@
-"""What the report wizard's Bank Deposit and Cash Count steps (``report/routes/deposit.py``,
-``report/routes/cash_count.py``) show and save - pinned before their logic moves into a service that
-the Jinja pages and the Petty Cash API share (minty-petty-cash-web's port, 2026-10-15).
-
-Characterisation: today's behaviour, quirks included. Since the Part 15 redesign (development,
-merged 2026-10-15) the deposit is the first block of the Cash Count page: a GET of the old Deposit
-address goes on to it, and a refused deposit comes back to it. Tests marked RULE pin the owner's
-rules of 2026-10-15 (a deposit above the cash on hand is refused at
-Deposit; any 1-cent difference counts; a difference needs a reason on Save & Next); the extraction
-changes them deliberately.
+"""The report wizard's Bank Deposit and Cash Count steps (``report/services/cash.py``), pinned through
+the Jinja pages (``report/routes/deposit.py``, ``report/routes/cash_count.py``) before their logic
+moved into that service (minty-petty-cash-web's port, 2026-10-15). Flask's HTML frontend was deleted
+2026-10-20: the steps' reads, saves and the owner's rules of 2026-10-15 are
+tests/test_petty_cash_api_cash.py's now; what is left here is what that file does not pin (the
+history each save writes, the closing the count leaves alone, the safebox, an over count, Save &
+Exit's count, a negative expected cash), driven through the Petty Cash API.
 """
 from __future__ import annotations
 
-import re
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import char_factories as F
 import pytest
-from flask import template_rendered
 
 pytestmark = pytest.mark.char
 
@@ -96,162 +90,44 @@ def _history(app, report_id):
         return [(h.field_changed, h.new_value) for h in ReportHistory.query.filter_by(report_id=report_id).all()]
 
 
-def _flashes(client):
-    with client.session_transaction() as sess:
-        return [m for _cat, m in sess.get("_flashes", [])]
+def _put(client, owner, entity, step, body, action="next"):
+    return client.put(f"/api/petty-cash/v1/companies/{entity.id}/reports/{step}",
+                      json={"transaction_date": F.iso(D3), "action": action, **body},
+                      headers=F.petty_cash_headers(client.application, owner.id))
 
 
-@contextmanager
-def _captured(app, name):
-    seen = []
-
-    def record(_sender, template, context, **_extra):
-        if template.name == name:
-            seen.append(context)
-
-    template_rendered.connect(record, app)
-    try:
-        yield seen
-    finally:
-        template_rendered.disconnect(record, app)
+def _deposit(client, owner, entity, amount, action="next"):
+    return _put(client, owner, entity, "deposit", {"bank_deposit": amount}, action)
 
 
-def _deposit(client, owner, entity, amount, action="save_next"):
-    F.login(client, owner)
-    return client.post("/report/deposit", data={"entity_id": entity.id, "transaction_date": F.iso(D3),
-                                                "bank_deposit": amount, "action_type": action})
+def _count(client, owner, entity, counts, *, safe_box=0, reason="", action="next"):
+    """``counts``: face value -> quantity."""
+    from blueprints.report.services.cash_denominations import resolve_denominations_for_entity
+
+    with client.application.app_context():
+        ids = {float(d.cash_value): str(d.cash_id) for d in resolve_denominations_for_entity(entity.id)}
+    return _put(client, owner, entity, "cash-count",
+                {"counts": {ids[face]: n for face, n in counts.items()}, "safe_box_balance": safe_box,
+                 "discrepancy_reason": reason}, action)
 
 
-def _count(client, owner, entity, counts, *, safe_box="0", reason="", action="save_next"):
-    F.login(client, owner)
-    form = {"entity_id": entity.id, "transaction_date": F.iso(D3), "action_type": action,
-            "safe_box_balance": safe_box, "discrepancy_amount": "999", "discrepancy_type": "over",
-            "discrepancy_reason": reason}
-    for field, face in F.denomination_fields(client.application, entity.id).items():
-        form[f"actual_cash[{field}]"] = str(counts.get(face, 0))
-    return client.post("/report/cash_count", data=form)
+# --- Deposit -----------------------------------------------------------------------------------------
 
 
-# --- Deposit: the page -------------------------------------------------------------------------------
-
-
-def test_the_deposit_address_goes_on_to_the_cash_count_page_which_shows_the_cash_on_hand(app, client, db, shop):
-    owner, entity = shop
-    _draft(app, db, entity, owner, bank_deposit=30)
-    F.login(client, owner)
-    base = f"{F.co(client, entity.id)}/petty-cash/reports/new"
-
-    resp = client.get(f"{base}/deposit", query_string={"transaction_date": F.iso(D3)})
-
-    assert resp.status_code == 302
-    assert f"/petty-cash/reports/new/cash-count?transaction_date={F.iso(D3)}" in resp.headers["Location"]
-    page = client.get(f"{base}/cash-count", query_string={"transaction_date": F.iso(D3)})
-    html = page.get_data(as_text=True)
-    assert page.status_code == 200
-    # before the deposit (the page writes the code and the amount with a no-break join)
-    assert re.search(r'id="currentBalanceDisplay">HKD\W?155\.00<', html), html[:200]
-
-
-def test_with_no_draft_the_cash_count_page_sends_you_to_opening_from_the_deposit_address(app, client, db, shop):
-    owner, entity = shop
-    F.login(client, owner)
-    base = f"{F.co(client, entity.id)}/petty-cash/reports/new"
-
-    hop = client.get(f"{base}/deposit", query_string={"transaction_date": F.iso(D3)})
-    resp = client.get(hop.headers["Location"])
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/report/opening")
-    assert _flashes(client) == ["I don't see a draft for today yet - let's start with the opening entry."]
-
-
-# --- Deposit: the save -------------------------------------------------------------------------------
-
-
-def test_save_next_stores_the_deposit_and_moves_on_to_the_cash_count(app, client, db, shop):
+def test_save_next_stores_the_deposit_and_writes_its_history(app, client, db, shop):
     owner, entity = shop
     draft = _draft(app, db, entity, owner)
 
-    resp = _deposit(client, owner, entity, "1,00.50")
+    resp = _deposit(client, owner, entity, 100.5)
 
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/cash-count?transaction_date={F.iso(D3)}")
+    assert resp.status_code == 200, resp.get_json()
     row = _row(app, draft)
     assert row["bank_deposit"] == 100.5
     assert row["closing_balance"] == 155 - 100.5
-    assert row["current_section"] == "cash_count"
-    assert row["completed_sections"] == ["opening", "sales", "expenses", "deposit"]
     assert _history(app, draft) == [("bank_deposit", "Bank Deposit: $100.5")]
 
 
-def test_save_exit_stores_the_deposit_and_goes_home_without_moving_on(app, client, db, shop):
-    owner, entity = shop
-    draft = _draft(app, db, entity, owner)
-
-    resp = _deposit(client, owner, entity, "10", action="save_exit")
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/petty-cash")
-    row = _row(app, draft)
-    assert row["bank_deposit"] == 10
-    assert row["current_section"] == "deposit" and row["completed_sections"] == ["opening", "sales", "expenses"]
-
-
-def test_a_negative_cash_on_hand_is_refused_before_the_deposit(app, client, db, shop):
-    owner, entity = shop
-    draft = _draft(app, db, entity, owner, expense_total=500)  # 120 + 50 - 500 < 0
-
-    resp = _deposit(client, owner, entity, "10")
-
-    assert resp.status_code == 302 and "/reports/new/cash-count" in resp.headers["Location"]
-    assert _flashes(client) == ["Hmm, it looks like your cash balance is negative. Could you fix that first?"]
-    assert _row(app, draft)["bank_deposit"] in (None, 0)
-
-
-def test_rule_a_deposit_above_the_cash_on_hand_is_refused(app, client, db, shop):
-    """RULE (owner, 2026-10-15): refused at Deposit, naming what is allowed. Flask took it here
-    and only blocked at Cash Count."""
-    owner, entity = shop
-    draft = _draft(app, db, entity, owner)
-
-    resp = _deposit(client, owner, entity, "155.01")
-
-    assert resp.status_code == 302 and "/reports/new/cash-count" in resp.headers["Location"]
-    assert _flashes(client) == ["The deposit can't be more than the cash on hand. Enter HKD155.00 or less."]
-    assert _row(app, draft)["bank_deposit"] in (None, 0)
-    _deposit(client, owner, entity, "155")  # all of it is fine
-    assert _row(app, draft)["bank_deposit"] == 155
-
-
-# --- Cash Count: the page ----------------------------------------------------------------------------
-
-
-def test_the_cash_count_page_lists_the_currencys_denominations_with_the_saved_counts(app, client, db, shop):
-    owner, entity = shop
-    _draft(app, db, entity, owner, bank_deposit=100, current_section="cash_count",
-           completed_sections=["opening", "sales", "expenses", "deposit"])
-    _count(client, owner, entity, {50: 1, 5: 1})
-
-    with _captured(app, "report/cash_count.html") as seen:
-        resp = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/cash-count",
-                          query_string={"transaction_date": F.iso(D3)})
-
-    assert resp.status_code == 200
-    rows = seen[0]["denomination_rows"]
-    assert [r["value"] for r in rows] == [1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1]
-    assert {r["value"]: r["count"] for r in rows if r["count"]} == {50: 1, 5: 1}
-
-
-def test_with_no_draft_the_cash_count_page_sends_you_to_opening(app, client, db, shop):
-    owner, entity = shop
-    F.login(client, owner)
-
-    resp = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/cash-count",
-                      query_string={"transaction_date": F.iso(D3)})
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/report/opening")
-    assert _flashes(client) == ["I don't see a draft for today yet - let's start with the opening entry."]
-
-
-# --- Cash Count: the save ----------------------------------------------------------------------------
+# --- Cash Count --------------------------------------------------------------------------------------
 
 
 def _counted(app, db, entity, owner, **fields):
@@ -262,19 +138,17 @@ def _counted(app, db, entity, owner, **fields):
     return _draft(app, db, entity, owner, **values)
 
 
-def test_an_exact_count_records_no_difference_and_moves_on_to_ending(app, client, db, shop):
+def test_an_exact_count_records_no_difference_leaves_the_closing_and_writes_its_history(app, client, db, shop):
     owner, entity = shop
     draft = _counted(app, db, entity, owner)
 
     resp = _count(client, owner, entity, {50: 1, 5: 1})
 
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/ending?transaction_date={F.iso(D3)}")
+    assert resp.status_code == 200, resp.get_json()
     assert _counts(app, draft) == {50: 1, 5: 1}
     row = _row(app, draft)
     assert (row["discrepancy_amount"], row["discrepancy_type"]) == (0, "none")
     assert row["current_section"] == "ending"
-    assert row["completed_sections"] == ["opening", "sales", "expenses", "deposit", "cash_count"]
     assert row["closing_balance"] == 55  # the cash count never writes it; submit adds the difference
     assert _history(app, draft) == [("cash_count", "Cash Count: $55.0")]
 
@@ -283,7 +157,7 @@ def test_a_short_count_is_a_negative_difference_and_the_safebox_counts_towards_i
     owner, entity = shop
     draft = _counted(app, db, entity, owner)
 
-    _count(client, owner, entity, {20: 2}, safe_box="5", reason="Gave change twice")  # 40 + 5 vs 55
+    _count(client, owner, entity, {20: 2}, safe_box=5, reason="Gave change twice")  # 40 + 5 vs 55
 
     row = _row(app, draft)
     assert (row["discrepancy_amount"], row["discrepancy_type"]) == (-10, "short")
@@ -300,56 +174,13 @@ def test_an_over_count_is_a_positive_difference(app, client, db, shop):
     assert (row["discrepancy_amount"], row["discrepancy_type"]) == (5, "over")
 
 
-def test_rule_a_one_cent_difference_counts(app, client, db, shop):
-    """RULE (owner, 2026-10-15): any difference counts. Flask's check was "more than 0.01", so
-    0.01 short was dropped and never reached Xero."""
-    owner, entity = shop
-    draft = _counted(app, db, entity, owner, expense_total=14.99)  # expected 55.01
-
-    _count(client, owner, entity, {50: 1, 5: 1}, reason="Rounding")
-
-    row = _row(app, draft)
-    assert (row["discrepancy_amount"], row["discrepancy_type"]) == (-0.01, "short")
-
-
-def test_rule_save_next_with_a_difference_needs_a_reason(app, client, db, shop):
-    """RULE (owner, 2026-10-15): checked on the server - Flask only asked in the browser, so a
-    shortage with no reason could reach Xero. The page keeps what was counted (Part 15.15d,
-    nothing typed is lost) and stays on Cash Count until a reason is given."""
-    owner, entity = shop
-    draft = _counted(app, db, entity, owner)
-
-    resp = _count(client, owner, entity, {50: 1})
-
-    assert resp.status_code == 302 and "/reports/new/cash-count" in resp.headers["Location"]
-    assert "reason=needed" in resp.headers["Location"]
-    assert _flashes(client) == ["The count is HKD5.00 short. Add the reason to continue."]
-    assert _counts(app, draft) == {50: 1}
-    row = _row(app, draft)
-    assert (row["discrepancy_amount"], row["discrepancy_type"]) == (-5, "short")
-    assert row["current_section"] == "cash_count"
-    assert row["completed_sections"] == ["opening", "sales", "expenses", "deposit"]
-
-
-def test_save_exit_keeps_a_difference_without_a_reason_for_later(app, client, db, shop):
-    owner, entity = shop
-    draft = _counted(app, db, entity, owner)
-
-    resp = _count(client, owner, entity, {50: 1}, action="save_exit")
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/petty-cash")
-    row = _row(app, draft)
-    assert (row["discrepancy_amount"], row["discrepancy_type"]) == (-5, "short")
-    assert row["completed_sections"] == ["opening", "sales", "expenses", "deposit"]
-
-
 def test_save_exit_keeps_the_count_and_puts_the_report_back_on_cash_count(app, client, db, shop):
     owner, entity = shop
     draft = _counted(app, db, entity, owner)
 
-    resp = _count(client, owner, entity, {50: 1, 5: 1}, action="save_exit")
+    resp = _count(client, owner, entity, {50: 1, 5: 1}, action="exit")
 
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/petty-cash")
+    assert resp.status_code == 200, resp.get_json()
     assert _counts(app, draft) == {50: 1, 5: 1}
     row = _row(app, draft)
     assert row["current_section"] == "cash_count"
@@ -362,14 +193,6 @@ def test_a_negative_expected_cash_is_refused(app, client, db, shop):
 
     resp = _count(client, owner, entity, {50: 1})
 
-    assert resp.status_code == 302 and "/reports/new/cash-count" in resp.headers["Location"]
-    assert _flashes(client) == ["Hmm, it looks like your cash balance is negative. Could you fix that first?"]
+    assert resp.status_code == 409, resp.get_json()
+    assert resp.get_json()["error"] == "Hmm, it looks like your cash balance is negative. Could you fix that first?"
     assert _counts(app, draft) == {}
-
-
-def test_with_no_draft_the_count_sends_you_to_opening(app, client, db, shop):
-    owner, entity = shop
-    resp = _count(client, owner, entity, {50: 1})
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/report/opening")
-    assert _flashes(client) == ["I don't see a draft for today yet - let's start with the opening entry."]

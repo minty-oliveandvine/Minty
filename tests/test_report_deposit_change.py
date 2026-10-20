@@ -176,11 +176,18 @@ def _patch_db_helper(monkeypatch, legacy, report, helper_calls, *, updated_closi
 
 
 def _deposit_view(legacy):
-    """The correction itself, past its login/membership/permission guards: these tests
-    pin the money logic; who may call it is pinned in test_url_security.py."""
-    import inspect
+    """The correction itself (``correct_previous_deposit``), answered as JSON the way the internal
+    route ``/api/internal/xero/deposit-correction`` answers it: these tests pin the money logic;
+    who may call it is pinned in test_petty_cash_internal_deposit_correction.py."""
+    from flask import jsonify, request
 
-    return inspect.unwrap(legacy.report_check_dept_bank_yest)
+    def view(entity_id):
+        payload, status = legacy.correct_previous_deposit(entity_id, request.get_json() or {})
+        response = jsonify(payload)
+        response.status_code = status
+        return response
+
+    return view
 
 
 def test_report_check_dept_bank_yest_unpublished_change_skips_xero(app, monkeypatch):
@@ -221,7 +228,7 @@ def test_report_check_dept_bank_yest_unpublished_change_skips_xero(app, monkeypa
     assert payload["closing_balance"] == 17000.0
     assert payload["is_published"] is False
     assert payload["xero_status"] == "skipped"
-    assert payload["redirect_url"].endswith("transaction_date=2025-03-03")
+    assert "redirect_url" not in payload  # a Flask page address; the app works out the next day itself
 
 
 def test_report_check_dept_bank_yest_unpublished_no_deposit_zeros_out(app, monkeypatch):

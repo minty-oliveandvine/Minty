@@ -1,10 +1,13 @@
 # Minty
 
-The Flask application behind Minty — companies, users, petty cash, Xero integration and the
-subscription/billing engine. Historically "pettycashv3", and still the repo the other services
-are being carved out of.
+The Flask backend behind Minty (the Accounts API, `accounts-api.dailyminty.com`) — sign-in,
+the hand-offs to the other apps, companies and users, Xero, and the petty-cash report's rules.
+**Backend only since 2026-10-20: it draws no page** (no templates; `static/` holds only the email
+images). Every screen is a Next.js app's. Historically "pettycashv3", and still the repo the
+other services are being carved out of.
 
-Runs on **port 8010** (or `$PORT` when the host sets it).
+Runs locally on **port 8000** (`docs/ENVIRONMENT.md` §2; Xero allows `localhost:8000/callback`); the
+`Procfile` and the Docker image bind `$PORT`, defaulting to 8010.
 
 ## The services around it
 
@@ -13,9 +16,11 @@ PostgreSQL database and `pettycashv3` schema:
 
 | Repo | What it is | Port |
 |---|---|---|
-| `minty-web` | Next.js. The hub: entity list, My Profile, module pages, payer portal | 3000 |
-| `minty-subscription-api` | Django + django-ninja. Subscriptions and Stripe | 8000 |
-| **Minty** (this one) | Flask. Petty Cash: auth, entities, petty cash, Xero, subscriptions | 8010 |
+| `minty-web` | Next.js. The hub: sign-in, companies, settings tabs, My Profile, module pages, payer portal | 3000 |
+| `minty-subscription-api` | Django + django-ninja. Subscriptions and Stripe | 8001 |
+| **Minty** (this one) | Flask, backend only. Auth, the hand-offs, companies, Xero, the internal routes | 8000 |
+| `minty-petty-cash-web` | Next.js. Petty Cash: the dashboard, the Daily Closing, history, settings, share links | 3010 |
+| `minty-petty-cash-api` | Django. Petty Cash's API (production's caller) | 8010 |
 | `minty-payment-request-web` | Next.js. The payment-request module | 3020 |
 | `minty-payment-request-api` | Django + django-ninja. Bills, payments, Xero bill sync | 8020 |
 | `minty-onboarding-web` | Next.js. The nine-step new-company wizard | 3030 |
@@ -42,8 +47,9 @@ Two things hold them together and are easy to get wrong:
 | Pre-staging | https://pre-staging-olive-and-vine-minty.onrender.com |
 | Development | https://development-olive-and-vine-minty.onrender.com |
 
-After the cutover, `minty-infra` (Option B) serves Petty Cash at https://pettycash.dailyminty.com
-(production) and https://dev-pettycash.dailyminty.com (development), on Render.
+Under `minty-infra` (Option B) this app is https://accounts-api.dailyminty.com (production) and
+https://dev-accounts-api.dailyminty.com (development), on Render; https://pettycash.dailyminty.com
+is minty-petty-cash-web.
 
 Each sibling reaches this app through its `PETTY_CASH_URL`. `main` deploys production and
 `development` deploys the development environment; until `minty-infra` is applied, the deploy
@@ -118,7 +124,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # then fill in DATABASE_URL, SECRET_KEY and S3_URL
 flask --app main.py db upgrade
-flask run --host=localhost --port=8010 --debug
+flask run --host=localhost --port=8000 --debug
 ```
 
 `.env.example` documents every variable. `SECRET_KEY`, `DATABASE_URL` (schema in its
@@ -129,8 +135,10 @@ any is missing. `APP_ENV=development` turns on debug locally; anything else runs
 
 ```bash
 pytest -n auto        # Postgres only; each worker builds docs/schema/01_schema_rebased.sql into its own database
-npm run test:e2e      # Playwright against a running Flask — e2e/README.md
 ```
+
+Flask has no browser journeys of its own (it draws no page); the screens are tested in the
+Next apps' suites ([`docs/features/ci.md`](docs/features/ci.md)).
 
 The suite is green (1,694 passed on 2026-09-18, about two minutes). Compare a full run
 before your change against a full run after — never a single file — and grep for `ERROR`
@@ -139,8 +147,8 @@ as well as `FAILED`, since collection errors do not show as failures.
 ## Documentation
 
 - [`docs/features/README.md`](docs/features/README.md) — one page per feature: authentication
-  across the five apps, companies and members, the report wizard, receipts, exports, Xero,
-  modules and subscriptions, the hand-offs, terms, expense AI, operations.
+  across the apps, companies and members, the petty-cash report's rules and its API, receipts,
+  share links, Xero, modules and subscriptions, the hand-offs, terms, expense AI, operations.
 - [`docs/schema/README.md`](docs/schema/README.md) — the redesigned database and the one-hop
   migration; [`docs/modernisation/modernisation_plan.md`](docs/modernisation/modernisation_plan.md)
   — the plan and the cutover runbook.

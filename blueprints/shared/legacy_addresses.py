@@ -35,11 +35,13 @@ LEGACY_ADDRESSES: list[tuple[str, str, str, dict[str, str], list[str]]] = [
      {"org_id": "org_id"}, ["GET"]),
     ("/invitation/xero-not-connected/<uuid:entity_id>", "xero_not_connected",
      "invitation.xero_not_connected", {"entity_id": "entity_id"}, ["GET"]),
-    ("/entity/<uuid:entity_id>/report/opening", "report_opening", "report.report_opening",
-     {"entity_id": "entity_id"}, ALL_METHODS),
+    # Flask's report pages went on 2026-10-20: their old addresses open the company's Petty Cash
+    # (minty-petty-cash-web, through the dashboard address's hand-off).
+    ("/entity/<uuid:entity_id>/report/opening", "report_opening", "entity.report_dashboard",
+     {"entity_id": "id"}, ["GET"]),
     ("/entity/<uuid:entity_id>/ending/<string:report_id>", "ending_with_report",
-     "report.entity_ending_with_report", {"entity_id": "entity_id", "report_id": "report_id"}, ["GET"]),
-    ("/entity/<uuid:entity_id>/ending", "ending", "report.entity_ending", {"entity_id": "entity_id"}, ["GET"]),
+     "entity.report_dashboard", {"entity_id": "id"}, ["GET"]),
+    ("/entity/<uuid:entity_id>/ending", "ending", "entity.report_dashboard", {"entity_id": "id"}, ["GET"]),
 ]
 
 

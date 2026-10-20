@@ -30,14 +30,6 @@ def db(app):
         F.truncate_all(app)
 
 
-@pytest.fixture(autouse=True)
-def no_notice(monkeypatch):
-    """The subscription notice asks minty-subscription-api over HTTP; not this test's business."""
-    import blueprints.entity.routes.list as list_routes
-
-    monkeypatch.setattr(list_routes, "fetch_notice", lambda *_a, **_k: None)
-
-
 @pytest.fixture
 def shop(app, db):
     with app.app_context():

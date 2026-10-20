@@ -24,7 +24,6 @@ on dependency injection).
 """
 from __future__ import annotations
 
-import os
 
 import jwt
 from flask import current_app, request
@@ -75,13 +74,6 @@ def minty_web_origin() -> str:
 def petty_cash_web_origin() -> str:
     """Origin of minty-petty-cash-web: the Petty Cash API's caller (``blueprints.petty_cash_api``)."""
     return _origin("PETTY_CASH_WEB_URL", PETTY_CASH_WEB_URL_DEFAULT)
-
-
-def petty_cash_web_is_set() -> bool:
-    """Whether ``PETTY_CASH_WEB_URL`` is set: only then do this app's own Petty Cash links go to
-    minty-petty-cash-web (``blueprints.shared.sidebar``). The local default above serves CORS and
-    ``/handoff/petty-cash-web`` alone, so an environment without the app keeps Flask's pages."""
-    return bool((os.environ.get("PETTY_CASH_WEB_URL") or "").strip())
 
 
 def cors(resp, origin: str, *, methods: str = "GET, POST, OPTIONS"):

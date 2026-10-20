@@ -12,8 +12,8 @@ Entity resolution mirrors how the routes themselves find their entity:
   * an expense / expense-draft id (``expense_id`` / ``draft_id``)
     -> the owning report(_draft)'s ``company``.
 
-When no entity can be resolved (generic file downloads, the admin statements
-tool, legacy public links) the request is allowed through — those routes carry
+When no entity can be resolved (the internal routes, the old public share address) the
+request is allowed through — those routes carry
 no entity context to gate on. Any unexpected error also fails open so a
 transient DB hiccup never locks users out of an otherwise-permitted route.
 """

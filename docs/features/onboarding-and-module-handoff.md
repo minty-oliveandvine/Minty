@@ -1,6 +1,7 @@
 # Onboarding and the hand-offs to the other apps
 
-Minty is the hub: it signs people in, and it launches two separate web apps with a
+Minty is the hub: it signs people in (it draws no page of its own since 2026-10-20), and it
+launches two separate web apps with a
 short-lived token — the **onboarding wizard** (`../minty-onboarding-web`, Next.js, backed by
 `../minty-onboarding-api`) and the **payment module** (`../minty-payment-request-web`, backed by
 `../minty-payment-request-api`). This page is Minty's side; each app documents its own in its
@@ -11,14 +12,10 @@ short-lived token — the **onboarding wizard** (`../minty-onboarding-web`, Next
 `onboarding_launch_url(user, entity_name=, entity_id=, fresh=)`
 (`blueprints/entity/routes/create.py`) builds `<ONBOARDING_WEB_URL>/?token=<jwt>[&entity_id=…][&fresh=1]`:
 the token is the 60-minute `scope: "onboarding"` JWT; `entity_id` resumes an in-progress
-company; `fresh=1` starts a brand-new one (what `GET /entity/create` sends). Invitations
-land on the wizard's `/auth` page the same way (with the invite token instead).
-
-`POST /entity/create` (the old create form) is a fallback no page reaches any more, and its
-phone rule is the old one: `_normalize_contact_phone` stores 8–11 bare digits. The wizard has
-stored E.164 (`+85291234567`) since 2026-10-12 and reads a digits-only row as a number under
-the company's Country, so a row written there still opens, but it is a second shape. Bring the
-form onto E.164 or delete it before anything reads `contact_phone` outside the wizard.
+company; `fresh=1` starts a brand-new one (what `GET /entity/create` sends - a GET only: the old
+WTForms create form and its POST were deleted on 2026-10-20, so the wizard's E.164 phone
+(`+85291234567`) is the only shape written now; rows written by the old form hold 8–11 bare
+digits, which the wizard reads as a number under the company's Country).
 
 ## `/api/onboarding/*` — served by two backends, same paths
 
@@ -57,7 +54,7 @@ note, `minty-onboarding-web/e2e/README.md`).
 
 ## Launching the payment module
 
-From the dashboard's module cards: `GET /entity/<id>/modules` (the picker),
+From minty-web's company list and module choice: `GET /entity/<id>/modules` (the router),
 `GET /entity/<co>/payment-request` (straight to the bills list). Both mint the 30-minute module JWT
 and redirect to `<minty-payment-request-web>/landing?token=&entity_id=&entity_name=&next=&from=`.
 The payment app calls minty-payment-request-api with the token as a bearer; minty-payment-request-api verifies

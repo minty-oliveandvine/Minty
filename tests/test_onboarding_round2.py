@@ -1,13 +1,11 @@
-"""Onboarding round 2 (2026-10-13): what the setup checks, the company list, the export and
-the wizard's later steps read and write.
+"""Onboarding round 2 (2026-10-13): what the setup checks, the company list and the wizard's
+later steps read and write.
 
 * The dashboard's "what's missing" list names all six petty-cash accounts and three contacts -
   it used to skip the discrepancy bank account, so a company missing only that saw "Setup
   Required" with nothing listed.
 * ``GET /api/me/entities`` takes every listed company's module flags in one query
   (``entity_setup_summary``), not two per company.
-* The report export's drawer total is the counted cash (``report_cash_summary``), every
-  denomination - it used to add up only the nine legacy HKD names.
 * A contact created from step 7 carries the Xero organisation it was made in, so an
   organisation switch clears it like every other cached contact.
 * Step 8 can mark one ticked bill account code as the default.
@@ -16,7 +14,7 @@ the wizard's later steps read and write.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import jwt
@@ -132,52 +130,6 @@ def test_the_company_list_does_not_query_per_company(app, client, db, shop, monk
     assert five == one
     listed = F.hub_list(client, app, shop.owner.id)
     assert len(listed) == 5
-
-
-# ---- the export's drawer total -------------------------------------------------------------
-
-
-def test_the_export_drawer_total_counts_every_denomination(app, client, db, shop, monkeypatch):
-    """A $200 note is not one of the nine legacy HKD names; it still counts."""
-    from blueprints.report.routes import export_screenshot
-    from models.db import CashInfo, Report, ReportCashCount
-
-    with app.app_context():
-        report = Report(entity_id=shop.entity.id, transaction_date=date(2026, 9, 1), status="submitted",
-                        completed_sections=["cash_count"], opening_balance=0, cash_addition=0)
-        db.session.add(report)
-        db.session.flush()
-        for value, qty in ((200, 1), (100, 2)):
-            cash = CashInfo.query.filter_by(currency_id=shop.currency.id, cash_value=value).one()
-            db.session.add(ReportCashCount(report_id=report.id, cash_id=cash.id, quantity=qty, cash_value=value))
-        db.session.commit()
-        report_id = report.id
-
-    seen = {}
-
-    class _Doc:
-        def __init__(self, _path):
-            pass
-
-        def render(self, context):
-            seen.update(context)
-
-        def save(self, path):
-            open(path, "wb").close()
-
-    monkeypatch.setattr(export_screenshot, "DocxTemplate", _Doc)
-    def _to_pdf(_docx, pdf_path):
-        with open(pdf_path, "wb") as fh:
-            fh.write(b"%PDF-1.4 test")
-        return True
-
-    monkeypatch.setattr(export_screenshot, "convert_docx_to_pdf", _to_pdf)
-    F.login(client, shop.owner)
-
-    resp = client.get(f"/report/{report_id}/export")
-
-    assert resp.status_code == 200, resp.data[:300]
-    assert seen["drawer_total"] == 400
 
 
 # ---- step 7: a created contact keeps its organisation ------------------------------------

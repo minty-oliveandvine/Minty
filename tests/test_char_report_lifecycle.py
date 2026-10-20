@@ -1,18 +1,22 @@
-"""Characterisation: the petty-cash report lifecycle, through the routes.
+"""Characterisation: the petty-cash report lifecycle, draft -> posted.
 
 Pins what a user sees while a report goes draft -> posted, so the schema redesign
 (``report`` loses 12 columns; sales become ``report_sale`` rows summed into
 ``nocashsale_total``; ``shop_expense`` becomes ``report_expense``; every money column
 becomes ``numeric``) can be applied underneath without changing any of it.
-
-Nothing here reads a model attribute. Totals are read back through
-``/api/get_draft_totals``, the history page and the report detail page.
 See docs/modernisation/modernisation_plan.md, Part 1 B3 group 1.
+
+Driven through the Jinja wizard until Flask's HTML frontend was deleted (2026-10-20); now through
+the Petty Cash API (``/api/petty-cash/v1/companies/<id>/...``) as the person ``F.login`` signed in.
+Two steps go straight to their service, because the API decides what the old form could choose: the
+Opening (``save_opening`` with the form's opening for a first report, as the page saved it) and an
+expense line (``add_expense`` with a free item; the API takes only the company's synced supplier and
+account). The helpers keep their names for the files that import them. Totals are read back through
+the API's Close read (``draft_totals``), the Daily Report and the report history.
 """
 
 from __future__ import annotations
 
-import re
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -60,88 +64,149 @@ def shop(app, db):
 REPORT_DATE = date(2026, 9, 1)
 
 
-def _post(client, url, **form):
-    """POST a wizard form; the wizard answers a redirect on success and re-renders (200) on a
-    validation error, so anything else is a crash."""
-    resp = client.post(url, data=form, follow_redirects=False)
-    assert resp.status_code in (200, 302), (url, resp.status_code, resp.data[:300])
+def _signed_in(client) -> str:
+    """The id of the person ``F.login`` signed in on this client."""
+    with client.session_transaction() as sess:
+        return sess["_user_id"]
+
+
+def _api(client, method, path, **kwargs):
+    entity_id, _, rest = path.partition("/")
+    headers = F.petty_cash_headers(client.application, _signed_in(client))
+    return client.open(f"/api/petty-cash/v1/companies/{entity_id}/{rest}", method=method, headers=headers, **kwargs)
+
+
+def _step(client, entity, step, day, **body):
+    """PUT one wizard step (Save & Next); anything but a 200 is a failure of the walk."""
+    resp = _api(client, "PUT", f"{entity.id}/reports/{step}", json={"transaction_date": F.iso(day), "action": "next", **body})
+    assert resp.status_code == 200, (step, resp.status_code, resp.get_json())
     return resp
 
 
-def open_report(client, entity, day=REPORT_DATE, *, opening="1000.00", addition="0"):
-    return _post(client, "/report/opening", entity_id=entity.id, transaction_date=F.iso(day),
-                 opening_balance=opening, cash_addition=addition, action_type="save_next")
+def open_report(client, entity, day=REPORT_DATE, *, opening="1000.00", addition="0", withdrawal="personal"):
+    """The Opening step, through ``report/services/opening.py::save_opening`` - with ``opening`` for
+    a company's first report unless onboarding set one, as the Jinja page saved it (the API
+    always opens at the server's figure). Returns the draft's id."""
+    from blueprints.report.services.opening import find_draft, first_report_opening, save_opening
+    from models.db import User, db
+
+    with client.application.app_context():
+        user = db.session.get(User, _signed_in(client))
+        balance = first_report_opening(entity.id, day)
+        balance = float(balance) if balance is not None else float(opening)
+        draft = save_opening(entity.id, user, day, balance, float(addition), withdrawal, "save_next",
+                             existing_draft=find_draft(entity.id, day))
+        return str(draft.id)
 
 
 def post_sales(client, entity, day, *, cash="0", by_method=None):
     """``by_method`` maps value_name -> amount for the entity's enabled methods."""
-    methods = F.enabled_sales_methods(client.application, entity.id)
-    form = {"entity_id": entity.id, "transaction_date": F.iso(day), "action_type": "save_next",
-            "sales[shop_sales][cash]": cash}
-    for value_name, amount in (by_method or {}).items():
-        mtype, _ = methods[value_name]
-        bucket = "delivery_sales" if str(mtype) == "delivery" else "shop_sales"  # sale_type enum word
-        # the form names the method without its "_sales" suffix (templates/report/sales.html)
-        form[f"sales[{bucket}][{value_name.replace('_sales', '')}]"] = amount
-    return _post(client, "/report/sale", **form)
+    return _step(client, entity, "sales", day, cash_sales=float(cash),
+                 amounts={v: float(a) for v, a in (by_method or {}).items()})
 
 
 def add_expense(client, entity, day, item, amount, *, remarks=""):
-    """One line, the way the page's "Add" button does it (/report/expense/add). Every line
-    must carry a receipt; the S3 client is the FakeS3."""
-    form = {"entity_id": entity.id, "transaction_date": F.iso(day), "item": item,
-            "amount": amount, "remarks": remarks, "files[0][0]": F.receipt(f"{item}.jpg")}
-    resp = client.post("/report/expense/add", data=form, content_type="multipart/form-data")
-    assert resp.status_code == 200, (resp.status_code, resp.data[:300])
-    body = resp.get_json()
-    assert body["status"] == "success", body
-    return body
+    """One line with one receipt, through ``report/services/expenses.py::add_expense`` (the S3
+    client is the FakeS3). Returns ``{"status", "expense": {"id", "files": [{"s3_key"}]}}``."""
+    from io import BytesIO
+
+    from werkzeug.datastructures import FileStorage
+
+    from blueprints.report.services.expenses import add_expense as add
+    from blueprints.report.services.opening import find_draft
+    from models.db import User, db
+
+    with client.application.app_context():
+        user = db.session.get(User, _signed_in(client))
+        receipt = FileStorage(BytesIO(b"\xff\xd8\xff\xe0fake-jpeg-bytes"), filename=f"{item}.jpg", content_type="image/jpeg")
+        line = add(find_draft(entity.id, day), user, item=item, amount=float(amount), remarks=remarks, contact_id=None,
+                   contact_name=None, account_id=None, account_code=None, files=[receipt])
+        return {"status": "success",
+                "expense": {"id": str(line.id), "files": [{"s3_key": key} for key in line.receipt_keys]}}
 
 
 def post_expenses(client, entity, day, items):
-    """Add each line, then move the wizard on (the section save with no new lines)."""
+    """Add each line, then move the wizard on (the step's save)."""
     for item, amount in items:
         add_expense(client, entity, day, item, amount)
-    return _post(client, "/report/expense", entity_id=entity.id, transaction_date=F.iso(day),
-                 action_type="save_next")
+    return _step(client, entity, "expenses", day)
 
 
 def post_deposit(client, entity, day, amount):
-    return _post(client, "/report/deposit", entity_id=entity.id, transaction_date=F.iso(day),
-                 bank_deposit=amount, action_type="save_next")
+    return _step(client, entity, "deposit", day, bank_deposit=float(amount))
 
 
-def post_cash_count(client, entity, day, counts, *, safe_box="0", discrepancy="0", dtype="none", reason=""):
-    """``counts`` maps face value -> quantity; unlisted denominations are 0."""
-    fields = F.denomination_fields(client.application, entity.id)
-    assert fields, "entity has no denominations - seed_currency not applied"
-    form = {"entity_id": entity.id, "transaction_date": F.iso(day), "action_type": "save_next",
-            "safe_box_balance": safe_box, "discrepancy_amount": discrepancy,
-            "discrepancy_type": dtype, "discrepancy_reason": reason}
-    for field, face in fields.items():
-        form[f"actual_cash[{field}]"] = str(counts.get(face, 0))
-    return _post(client, "/report/cash_count", **form)
+def _denomination_ids(app, entity) -> dict:
+    """face value -> the denomination id the API takes."""
+    from blueprints.report.services.cash_denominations import resolve_denominations_for_entity
+
+    with app.app_context():
+        return {float(d.cash_value): str(d.cash_id) for d in resolve_denominations_for_entity(entity.id)}
+
+
+def post_cash_count(client, entity, day, counts, *, safe_box="0", reason=""):
+    """``counts`` maps face value -> quantity; unlisted denominations are 0. The difference is the
+    server's (counted + safebox - expected)."""
+    ids = _denomination_ids(client.application, entity)
+    assert ids, "entity has no denominations - seed_currency not applied"
+    return _step(client, entity, "cash-count", day, counts={ids[float(f)]: int(n) for f, n in counts.items()},
+                 safe_box_balance=float(safe_box), discrepancy_reason=reason)
 
 
 def post_ending(client, entity, day):
-    return _post(client, "/report/ending", entity_id=entity.id, transaction_date=F.iso(day),
-                 action_type="submit")
+    resp = _api(client, "POST", f"{entity.id}/reports/submit", json={"transaction_date": F.iso(day)})
+    assert resp.status_code == 200, resp.get_json()
+    return resp
 
 
 def draft_totals(client, entity, day):
-    resp = client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(day)}")
-    assert resp.status_code == 200, resp.data[:300]
-    return resp.get_json()
+    """The day's draft as the Close read shows it; ``closing_balance`` is the expected cash (no
+    difference), as Flask's old draft-totals read worked it out."""
+    resp = _api(client, "GET", f"{entity.id}/reports/close", query_string={"transaction_date": F.iso(day)})
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    return {"status": "success", "opening_balance": body["opening_balance"], "cash_addition": body["cash_addition"],
+            "cash_sales": body["sales"]["cash"], "total_sales": body["sales"]["total"],
+            "total_expenses": body["expenses"]["total"], "bank_deposit": body["cash"]["bank_deposit"],
+            "closing_balance": body["cash"]["expected"], "difference": body["cash"]["difference"],
+            "discrepancy_amount": body["cash"]["difference"]["amount"]}
 
 
 def money(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
-def dollar_figures(html: str) -> set[Decimal]:
-    """Every ``$1,234.5``-style amount on a page, as exact money. Formatting (one decimal
-    today, two after the numeric change) is not the behaviour being pinned; the amounts are."""
-    return {money(m.replace(",", "")) for m in re.findall(r"\$\s*(-?[\d,]+(?:\.\d+)?)", html)}
+def dollar_figures(body) -> set[Decimal]:
+    """Every amount in a JSON answer (nested), as the exact Decimal it was sent as - so a float
+    that drifted off the cent (0.30000000000000004) is not in the set as 0.30."""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, bool):
+            return
+        if isinstance(node, (int, float)):
+            found.add(Decimal(str(node)))
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(body)
+    return found
+
+
+def history(client, entity) -> list[dict]:
+    """The report history's rows (``GET /reports``)."""
+    resp = _api(client, "GET", f"{entity.id}/reports", query_string={"per_page": 100})
+    assert resp.status_code == 200, resp.get_json()
+    return resp.get_json()["reports"]
+
+
+def history_badges(client, entity) -> list[str]:
+    """The Status pill each row shows (Part 14 Status pill: the words carry the meaning)."""
+    return [r["status_label"] for r in history(client, entity)]
 
 
 # ---------------------------------------------------------------------------------
@@ -151,12 +216,10 @@ def test_opening_creates_a_draft_visible_in_draft_totals(shop, client):
     owner, entity = shop
     F.login(client, owner)
 
-    resp = open_report(client, entity, opening="1000.00", addition="50.00")
+    open_report(client, entity, opening="1000.00", addition="50.00")
 
-    assert resp.status_code == 302, resp.data[:300]
-    assert "/reports/new/sale" in resp.headers["Location"], resp.headers["Location"]
     totals = draft_totals(client, entity, REPORT_DATE)
-    assert totals["status"] == "success", totals
+    assert money(totals["opening_balance"]) == money("1000.00") and money(totals["cash_addition"]) == money("50.00")
 
 
 def test_the_withdrawal_source_is_kept_on_every_save_of_the_opening(shop, client, app):
@@ -172,85 +235,11 @@ def test_the_withdrawal_source_is_kept_on_every_save_of_the_opening(shop, client
             row = Report.query.filter_by(entity_id=entity.id, transaction_date=REPORT_DATE).one()
             return row.cash_addition_type
 
-    _post(client, "/report/opening", entity_id=entity.id, transaction_date=F.iso(REPORT_DATE),
-          opening_balance="1000.00", cash_addition="50.00", withdrawal="company", action_type="save_next")
+    _step(client, entity, "opening", REPORT_DATE, cash_addition=50, withdrawal="company")
     assert source() == "company"
 
-    _post(client, "/report/opening", entity_id=entity.id, transaction_date=F.iso(REPORT_DATE),
-          opening_balance="1000.00", cash_addition="50.00", withdrawal="personal", action_type="save_next")
+    _step(client, entity, "opening", REPORT_DATE, cash_addition=50, withdrawal="personal")
     assert source() == "personal"
-
-
-def _onboarded(app, entity, *, opening, start):
-    """What onboarding Step 5 leaves: the opening balance and start date on the settings row."""
-    from models.db import EntityPettycashSettings, db as _db
-
-    with app.app_context():
-        _db.session.add(EntityPettycashSettings(entity_id=entity.id, opening_balance=opening, start_date=start))
-        _db.session.commit()
-
-
-def _opening_of(app, entity, day):
-    from models.db import Report
-
-    with app.app_context():
-        row = Report.query.filter_by(entity_id=entity.id, transaction_date=day).one()
-        return money(row.opening_balance)
-
-
-def test_the_first_report_offers_the_onboarding_balance_and_date(shop, client, app):
-    owner, entity = shop
-    _onboarded(app, entity, opening=750, start=REPORT_DATE)
-    F.login(client, owner)
-
-    html = client.get(f"/report/opening?entity_id={entity.id}", follow_redirects=True).get_data(as_text=True)
-
-    assert 'name="opening_balance" value="750.0"' in html
-    assert f'name="transaction_date" value="{F.iso(REPORT_DATE)}"' in html
-
-
-def test_the_first_report_opens_at_the_onboarding_balance_whatever_the_form_says(shop, client, app):
-    """The hidden field is the browser's; the first report's opening is the server's."""
-    owner, entity = shop
-    _onboarded(app, entity, opening=750, start=REPORT_DATE)
-    F.login(client, owner)
-
-    resp = open_report(client, entity, REPORT_DATE, opening="99999.00")
-
-    assert "/reports/new/sale" in resp.headers["Location"], resp.headers.get("Location")
-    assert _opening_of(app, entity, REPORT_DATE) == money("750.00")
-
-
-def test_the_first_report_cannot_start_before_the_onboarding_date(shop, client, app):
-    owner, entity = shop
-    _onboarded(app, entity, opening=750, start=REPORT_DATE)
-    F.login(client, owner)
-
-    resp = open_report(client, entity, REPORT_DATE - timedelta(days=1))
-
-    assert resp.status_code == 302
-    assert "/sale" not in resp.headers.get("Location", "")
-    assert client.get(
-        f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE - timedelta(days=1))}"
-    ).status_code == 404
-
-
-def test_without_an_onboarding_start_date_the_form_balance_stands(shop, client, app):
-    """A company onboarded before the settings columns were written keeps the old path."""
-    owner, entity = shop
-    F.login(client, owner)
-
-    open_report(client, entity, REPORT_DATE, opening="1000.00")
-
-    assert _opening_of(app, entity, REPORT_DATE) == money("1000.00")
-
-
-def test_draft_totals_404_before_any_report_exists(shop, client):
-    owner, entity = shop
-    F.login(client, owner)
-    resp = client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
-    assert resp.status_code == 404
-    assert resp.get_json()["status"] == "error"
 
 
 def test_sales_by_method_roll_up_into_totals(shop, client):
@@ -267,11 +256,13 @@ def test_sales_by_method_roll_up_into_totals(shop, client):
     post_sales(client, entity, REPORT_DATE, cash="150.10",
                by_method={visa: "200.20", alipay: "0.30", foodpanda: "99.99"})
 
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/sale?transaction_date={F.iso(REPORT_DATE)}")
+    page = _api(client, "GET", f"{entity.id}/reports/sales", query_string={"transaction_date": F.iso(REPORT_DATE)})
     assert page.status_code == 200
-    html = page.get_data(as_text=True)
-    for amount in ("150.1", "200.2", "0.3", "99.99"):
-        assert amount in html, f"{amount} not shown on the sales page"
+    body = page.get_json()
+    shown = {m["value_name"]: money(m["amount"]) for m in body["methods"]}
+    assert (shown[visa], shown[alipay], shown[foodpanda]) == (money("200.20"), money("0.30"), money("99.99"))
+    assert money(body["cash_sales"]) == money("150.10")
+    assert money(draft_totals(client, entity, REPORT_DATE)["total_sales"]) == money("450.59")
 
 
 def test_expenses_total_is_the_sum_of_the_lines(shop, client):
@@ -313,10 +304,6 @@ def test_deposit_closes_the_balance(shop, client):
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["bank_deposit"]) == money("500.00"), totals
     assert money(totals["closing_balance"]) == money("825.00"), totals
-    # Bank Deposit is the first block of the Cash Count stage since the Part 15 redesign: the old
-    # step's page goes on there (tests/test_petty_cash_cash_count_stage.py)
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/deposit?transaction_date={F.iso(REPORT_DATE)}")
-    assert page.status_code == 302 and "/cash-count" in page.headers["Location"]
 
 
 # ---- through to posted ----------------------------------------------------------------
@@ -344,31 +331,17 @@ def count_exactly(amount: Decimal, faces) -> dict:
     return counts
 
 
-def history_rows(client, entity):
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports")
-    assert page.status_code == 200, page.data[:300]
-    return page.get_data(as_text=True)
-
-
-def history_badges(client, entity) -> list[str]:
-    """The Status pill each row shows (Part 14 Status pill: the words carry the meaning)."""
-    html = history_rows(client, entity)
-    return re.findall(r'class="pc-pill pc-pill--\w+" data-tone="\w+">([^<]+)<', html)
-
-
 def test_exact_cash_count_has_no_discrepancy(shop, client):
     owner, entity = shop
     F.login(client, owner)
     expected_closing = walk_to_cash_count(client, entity)
     faces = F.denomination_fields(client.application, entity.id).values()
 
-    resp = post_cash_count(client, entity, REPORT_DATE, count_exactly(expected_closing, faces))
+    post_cash_count(client, entity, REPORT_DATE, count_exactly(expected_closing, faces))
 
-    assert resp.status_code == 302, resp.data[:300]
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["closing_balance"]) == expected_closing, totals
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/cash-count?transaction_date={F.iso(REPORT_DATE)}")
-    assert page.status_code == 200
+    assert totals["difference"]["kind"] == "none"
 
 
 def test_short_cash_count_records_a_shortage(shop, client):
@@ -378,12 +351,10 @@ def test_short_cash_count_records_a_shortage(shop, client):
     faces = F.denomination_fields(client.application, entity.id).values()
     counted = expected_closing - money("20.00")
 
-    post_cash_count(client, entity, REPORT_DATE, count_exactly(counted, faces),
-                    discrepancy="20.00", dtype="shortage", reason="till float short")
+    post_cash_count(client, entity, REPORT_DATE, count_exactly(counted, faces), reason="till float short")
 
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/ending?transaction_date={F.iso(REPORT_DATE)}")
-    assert page.status_code == 200
-    assert "short" in page.get_data(as_text=True).lower()
+    difference = draft_totals(client, entity, REPORT_DATE)["difference"]
+    assert difference["kind"] == "short" and money(difference["amount"]) == money("-20.00")
 
 
 def post_report(client, entity, day=REPORT_DATE, **walk):
@@ -392,82 +363,21 @@ def post_report(client, entity, day=REPORT_DATE, **walk):
     faces = F.denomination_fields(client.application, entity.id).values()
     post_cash_count(client, entity, day, count_exactly(expected_closing, faces))
     resp = post_ending(client, entity, day)
-    assert resp.status_code == 302, resp.data[:300]
-    location = resp.headers["Location"]
-    m = re.search(r"/reports/([0-9a-f-]{36})/submitted", location)
-    assert m, f"ending did not land on the submitted page: {location}"
-    return m.group(1), expected_closing
+    return resp.get_json()["report_id"], expected_closing
 
 
-def test_ending_posts_the_report_and_lands_on_submitted(shop, client):
+def test_ending_posts_the_report(shop, client):
     owner, entity = shop
     F.login(client, owner)
 
     report_id, closing = post_report(client, entity)
 
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/{report_id}/submitted")
-    assert page.status_code == 200
-    assert report_id in history_rows(client, entity)
+    outcome = _api(client, "GET", f"{entity.id}/reports/{report_id}/outcome")
+    assert outcome.status_code == 200 and outcome.get_json()["submitted"] is True
+    assert report_id in [r["id"] for r in history(client, entity)]
     # once posted there is no draft for that date any more
-    resp = client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
-    assert resp.status_code == 404
-
-
-def test_submitted_page_offers_a_first_publish_until_the_report_has_been_to_xero(shop, client, app):
-    """publishing_status is NOT NULL since the redesign ('unpublished' is the never-published
-    state): a fresh report gets the plain Publish button; only a report that has been through
-    a publish (completed, or failed half-way) gets the republish warning."""
-    from models.db import Report, db
-
-    owner, entity = shop
-    F.login(client, owner)
-    report_id, _ = post_report(client, entity)
-
-    html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/{report_id}/submitted").get_data(as_text=True)
-    assert 'id="publishButton"' in html and 'id="republishButton"' not in html
-
-    with app.app_context():
-        report = db.session.get(Report, report_id)
-        assert report.publishing_status == "unpublished"
-        report.publishing_status = "failed"
-        db.session.commit()
-    html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/{report_id}/submitted").get_data(as_text=True)
-    assert 'id="republishButton"' in html and 'id="publishButton"' not in html
-
-
-def test_publish_locks_the_report_and_hands_it_to_the_background_worker(shop, client, app, monkeypatch):
-    """The publish route takes a SELECT ... FOR UPDATE NOWAIT on the report. Since C4 the
-    report eager-loads its creator (and the creator their token) through outer joins, and
-    Postgres refuses to lock the nullable side of an outer join - the lock has to name the
-    report table (``of=Report``). Xero itself is stubbed out; the DB is real."""
-    import sys
-    from types import SimpleNamespace
-
-    from models.db import Report, db
-
-    owner, entity = shop
-    F.login(client, owner)
-    report_id, _ = post_report(client, entity)
-
-    # the publish start lives in xero/services/publish_start.py since 2026-10-16
-    route = sys.modules["blueprints.xero.services.publish_start"]
-    started = []
-    monkeypatch.setattr(route, "resolve_xero_token", lambda entity_id, user: SimpleNamespace(access_token="tok", username=user.username))
-    monkeypatch.setattr(route, "check_entity_xero_settings_complete", lambda entity_id: True)
-    monkeypatch.setattr(route, "sync_entity_xero_status", lambda entity_id, **kw: None)
-    monkeypatch.setattr(route, "validate_expenses_for_system_accounts", lambda *a, **kw: [])
-    monkeypatch.setattr(route, "process_xero_integration_background", lambda *args: started.append(args))
-
-    resp = client.post(f"/report/submitted/publish_to_xero?entity_id={entity.id}&report_id={report_id}")
-
-    assert resp.status_code == 202, resp.data[:400]
-    assert resp.get_json()["status"] == "publishing"
-    with app.app_context():
-        assert db.session.get(Report, report_id).publishing_status == "publishing"
-    deadline = __import__("time").time() + 5
-    while not started and __import__("time").time() < deadline:
-        __import__("time").sleep(0.05)
-    assert started and str(started[0][2]) == report_id, "the background worker was not handed the report"
+    resp = _api(client, "GET", f"{entity.id}/reports/close", query_string={"transaction_date": F.iso(REPORT_DATE)})
+    assert resp.status_code == 409 and resp.get_json()["to"] == "submitted"
 
 
 def test_the_publish_finds_its_expense_line_by_the_xero_ids(shop, client, app):
@@ -476,7 +386,6 @@ def test_the_publish_finds_its_expense_line_by_the_xero_ids(shop, client, app):
     Filtering on the model's ``contact_id`` / ``account_code`` properties compiled to
     WHERE false after the redesign: no line found, so no receipt reached Xero."""
     import uuid
-    from decimal import Decimal
 
     from blueprints.xero.services.publish import (expense_line_for_contact, expense_lines_for_contact,
                                                   find_expense_line)
@@ -515,13 +424,11 @@ def test_posted_report_detail_shows_the_same_totals(shop, client):
     report_id, closing = post_report(client, entity, opening="1000.00", cash="300.00",
                                      expenses=(("Tape", "25.00"),), deposit="500.00")
 
-    page = client.get(f"/report/{report_id}")
-    assert page.status_code == 200, page.data[:300]
-    html = page.get_data(as_text=True)
-    shown = dollar_figures(html)
+    page = _api(client, "GET", f"{entity.id}/reports/{report_id}")
+    assert page.status_code == 200, page.get_json()
+    shown = dollar_figures(page.get_json())
     for figure in ("1000.00", "300.00", "25.00", "500.00", "775.00"):
-        assert money(figure) in shown, f"{figure} missing from the report detail; shown: {sorted(shown)}"
-    assert "owner@test.com" in html or "Olive" in html, "creator not shown"
+        assert money(figure) in shown, f"{figure} missing from the Daily Report; shown: {sorted(shown)}"
 
 
 def test_history_csv_lists_the_days_movements(shop, client):
@@ -530,7 +437,8 @@ def test_history_csv_lists_the_days_movements(shop, client):
     F.login(client, owner)
     post_report(client, entity)
 
-    resp = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/download-csv?start_date={F.iso(REPORT_DATE)}&end_date={F.iso(REPORT_DATE)}")
+    resp = _api(client, "GET", f"{entity.id}/reports/export.csv",
+                query_string={"start_date": F.iso(REPORT_DATE), "end_date": F.iso(REPORT_DATE)})
 
     assert resp.status_code == 200, resp.data[:300]
     rows = [r.split(",") for r in resp.get_data(as_text=True).splitlines() if r.strip()]
@@ -541,39 +449,28 @@ def test_history_csv_lists_the_days_movements(shop, client):
     assert all(r[0] == F.iso(REPORT_DATE) for r in rows[1:])
 
 
-def test_history_csv_without_a_date_range_is_refused(shop, client):
-    owner, entity = shop
-    F.login(client, owner)
-    resp = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/download-csv")
-    assert resp.status_code == 400
-    assert resp.get_json()["status"] == "error"
-
-
-def test_convert_to_draft_reopens_the_report_at_opening(shop, client):
+def test_reopening_puts_the_report_back_to_a_draft_at_opening(shop, client):
     owner, entity = shop
     F.login(client, owner)
     report_id, closing = post_report(client, entity)
 
-    resp = client.post(f"/report/{report_id}/convert-to-draft")
+    resp = _api(client, "POST", f"{entity.id}/reports/{report_id}/reopen")
 
-    assert resp.status_code == 200, resp.data[:300]
-    body = resp.get_json()
-    assert body["status"] == "success" and body["draft_id"] == report_id, body
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["report_id"] == report_id and resp.get_json()["next"] == "opening"
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["opening_balance"]) == money("1000.00")
     assert money(totals["cash_sales"]) == money("300.00")
     assert money(totals["bank_deposit"]) == money("500.00")
-    resume = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/resume?transaction_date={F.iso(REPORT_DATE)}")
-    assert resume.status_code == 302 and "/opening" in resume.headers["Location"]
 
 
-def test_convert_to_draft_keeps_the_expenses(shop, client):
+def test_reopening_keeps_the_expenses(shop, client):
     """F1 (fixed in C4): reverting no longer deletes the expense lines."""
     owner, entity = shop
     F.login(client, owner)
     report_id, closing = post_report(client, entity)
 
-    client.post(f"/report/{report_id}/convert-to-draft")
+    _api(client, "POST", f"{entity.id}/reports/{report_id}/reopen")
 
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["total_expenses"]) == money("25.00"), totals
@@ -603,9 +500,9 @@ def test_an_edit_after_a_xero_publish_drops_the_report_back_to_submitted(shop, c
         db.session.commit()
     assert history_badges(client, entity) == ["Published to Xero"]
 
-    resp = client.post(f"/report/{report_id}/edit/discrepancy-reason", data={"discrepancy_reason": "recounted"})
+    resp = _api(client, "PUT", f"{entity.id}/reports/{report_id}/difference-reason", json={"reason": "recounted"})
 
-    assert resp.status_code == 200, resp.data[:300]
+    assert resp.status_code == 200, resp.get_json()
     with app.app_context():
         report = db.session.get(Report, report_id)
         assert report.status == ReportStatus.SUBMITTED
@@ -619,25 +516,20 @@ def test_delete_posted_report_removes_it_from_history(shop, client, s3):
     F.login(client, owner)
     report_id, _ = post_report(client, entity)
 
-    resp = client.post(f"/report/delete/{report_id}")
+    resp = _api(client, "DELETE", f"{entity.id}/reports/{report_id}")
 
-    assert resp.status_code == 302, resp.data[:300]
-    assert report_id not in history_rows(client, entity)
-    assert client.get(f"/report/{report_id}").status_code == 404
+    assert resp.status_code == 200, resp.get_json()
+    assert report_id not in [r["id"] for r in history(client, entity)]
+    assert _api(client, "GET", f"{entity.id}/reports/{report_id}").status_code == 404
 
 
-def test_every_receipt_the_detail_page_shows_is_an_object_the_bucket_holds(shop, client, s3, app):
+def test_a_legacy_receipt_key_with_commas_is_one_key(shop, client, s3, app):
     """Receipts named before 2026-09-18 carry the expense item verbatim, commas included
     ("Staff Welfare - Meal, Transport etc" -> ``..._MEAL,_TRANSPORT_ETC_25.jpg``; 1,195 such
     keys in production). The comma-joined ``files`` value used to be split on every comma, so
     the pages asked the bucket for two halves no object has: a broken image ("Key not found").
     The key here is planted the way the loader stores such a row, whatever new uploads are
-    named."""
-    import zipfile
-    from html import unescape
-    from io import BytesIO
-    from urllib.parse import unquote
-
+    named. (The receipt's bytes: tests/test_petty_cash_api_expenses.py.)"""
     from models.db import ShopExpense, db
 
     owner, entity = shop
@@ -651,37 +543,6 @@ def test_every_receipt_the_detail_page_shows_is_an_object_the_bucket_holds(shop,
         db.session.commit()
         assert expense.receipt_keys == [legacy_key]
 
-    # the detail page offers one receipt per key, and each key is one the bucket holds.
-    # Since 2026-10-09 the control is a viewer button carrying the key, not a download
-    # link: the receipt opens full screen on the page (no new tab, no download).
-    html = client.get(f"/report/{report_id}").get_data(as_text=True)
-    keys = [unquote(unescape(k)) for k in re.findall(r'data-receipt-key="([^"]+)"', html)]
-    assert keys == [legacy_key], f"receipt keys {keys}"
-    # no receipt link at the download route (the Excel export's own /report/download/ stays)
-    assert "/download/expenses/" not in html, "a receipt still links at the download route"
-
-    # the viewer reads the bytes from this origin, inline, so pdf.js can fetch them
-    resp = client.get(f"/preview/{legacy_key}")
-    assert resp.status_code == 200, resp.status_code
-    assert "inline" in resp.headers.get("Content-Disposition", "")
-
-    # the download route still works for anyone who reaches it directly
-    resp = client.get(f"/download/{legacy_key}")
-    assert resp.status_code == 302 and resp.headers["Location"] == f"https://fake-s3.test/{legacy_key}", resp.headers.get("Location")
-
-    # the attachments download: the same receipt, whole, inside the zip. It spans every
-    # company, so only a superuser may run it (2026-10-05).
-    from models.db import User
-
-    with app.app_context():
-        root = F.make_user(db, "root@test.com", system_role=User.SYSTEM_ROLE_SUPERUSER)
-    F.login(client, root)
-    resp = client.post("/download_attachments", data={"start_date": F.iso(REPORT_DATE), "end_date": F.iso(REPORT_DATE),
-                                                       "company": entity.id})
-    assert resp.status_code == 200, resp.data[:300]
-    names = zipfile.ZipFile(BytesIO(resp.data)).namelist()
-    assert names == [f"{F.iso(REPORT_DATE)}/{legacy_key.rsplit('/', 1)[-1]}"], names
-
 
 def test_delete_posted_report_removes_its_receipts_from_storage(shop, client, s3):
     """F2 (fixed in C4): the expense lines' receipts go with the report."""
@@ -690,21 +551,9 @@ def test_delete_posted_report_removes_its_receipts_from_storage(shop, client, s3
     report_id, _ = post_report(client, entity)
     assert s3.objects, "the expense receipt should have been stored"
 
-    client.post(f"/report/delete/{report_id}")
+    _api(client, "DELETE", f"{entity.id}/reports/{report_id}")
 
     assert not s3.objects, f"receipts left behind: {list(s3.objects)}"
-
-
-def test_resume_lands_on_the_next_incomplete_section(shop, client):
-    owner, entity = shop
-    F.login(client, owner)
-    open_report(client, entity)
-    post_sales(client, entity, REPORT_DATE, cash="10")
-
-    resp = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/resume?transaction_date={F.iso(REPORT_DATE)}")
-
-    assert resp.status_code == 302, resp.data[:300]
-    assert "/expense" in resp.headers["Location"], resp.headers["Location"]
 
 
 def test_next_day_opening_is_yesterdays_closing(shop, client):
@@ -714,39 +563,10 @@ def test_next_day_opening_is_yesterdays_closing(shop, client):
     _, closing = post_report(client, entity, REPORT_DATE)
     day2 = REPORT_DATE + timedelta(days=1)
 
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/opening?transaction_date={F.iso(day2)}")
+    page = _api(client, "GET", f"{entity.id}/reports/opening", query_string={"transaction_date": F.iso(day2)})
 
-    assert page.status_code == 200, page.data[:300]
-    html = page.get_data(as_text=True)
-    assert f"{closing:,.2f}" in html or str(closing) in html, f"{closing} not offered as day-2 opening"
-
-
-def test_a_second_report_for_the_same_day_is_refused(shop, client):
-    owner, entity = shop
-    F.login(client, owner)
-    post_report(client, entity, REPORT_DATE)
-
-    resp = open_report(client, entity, REPORT_DATE)
-
-    # the wizard bounces with a flash rather than creating a duplicate
-    assert resp.status_code == 302
-    assert "/sale" not in resp.headers.get("Location", "")
-    assert client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}").status_code == 404
-
-
-def test_member_without_report_rights_cannot_open_the_wizard(shop, client, app, db):
-    owner, entity = shop
-    with app.app_context():
-        viewer = F.make_user(db, "viewer@test.com")
-        from models.db import UserEntity
-        db.session.add(UserEntity(user_id=viewer.id, entity_id=entity.id, role="entity_base", approved=True))
-        db.session.commit()
-    F.login(client, viewer)
-
-    resp = open_report(client, entity)
-
-    assert resp.status_code == 302
-    assert "/sale" not in resp.headers.get("Location", "")
+    assert page.status_code == 200, page.get_json()
+    assert money(page.get_json()["starting_cash_balance"]) == closing
 
 
 # ---- cash in stock (entity_cash_detail), 2026-10-13 ---------------------------------------
@@ -797,7 +617,7 @@ def test_reverting_the_only_report_empties_the_stock(shop, client, app):
     F.login(client, owner)
     report_id, _ = post_report(client, entity)
 
-    client.post(f"/report/{report_id}/convert-to-draft")
+    _api(client, "POST", f"{entity.id}/reports/{report_id}/reopen")
 
     assert stock(app, entity) and set(stock(app, entity).values()) == {money("0")}
 
@@ -809,7 +629,7 @@ def test_deleting_the_latest_report_falls_back_to_the_one_before(shop, client, a
     second_id, _ = post_report(client, entity, REPORT_DATE + timedelta(days=1),
                                opening=str(first_closing), cash="80.00")
 
-    client.post(f"/report/delete/{second_id}")
+    _api(client, "DELETE", f"{entity.id}/reports/{second_id}")
 
     faces = F.denomination_fields(app, entity.id).values()
     assert stock(app, entity) == expected_stock(app, entity, count_exactly(first_closing, faces))
@@ -826,7 +646,7 @@ def test_after_a_currency_change_the_stock_follows_the_new_currency(shop, client
         Entity.query.get(entity.id).currency_id = jpy.id
         db.session.commit()
 
-    client.post(f"/report/{report_id}/convert-to-draft")
+    _api(client, "POST", f"{entity.id}/reports/{report_id}/reopen")
 
     with app.app_context():
         jpy_faces = {money(c.cash_value) for c in CashInfo.query.filter_by(currency_id=jpy.id)}
@@ -841,7 +661,7 @@ def test_an_all_zero_count_reads_as_counted_zero(shop, client, app):
     F.login(client, owner)
     walk_to_cash_count(client, entity)
     # an empty drawer against 775.00 expected is a difference, which needs a reason to be done
-    post_cash_count(client, entity, REPORT_DATE, {}, discrepancy="0", reason="drawer emptied")
+    post_cash_count(client, entity, REPORT_DATE, {}, reason="drawer emptied")
 
     with app.app_context():
         report = Report.query.filter_by(entity_id=entity.id, transaction_date=REPORT_DATE).one()

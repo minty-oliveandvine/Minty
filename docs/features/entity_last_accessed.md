@@ -4,8 +4,8 @@
 shows, how the code produces it, and the things most likely to trip you up when
 you change it.
 
-**Assumed knowledge:** Flask routes, SQLAlchemy queries, and Jinja templates at
-a basic level. Everything beyond that is explained inline.
+**Assumed knowledge:** Flask routes and SQLAlchemy queries at a basic level. Everything beyond
+that is explained inline.
 
 **Ported from:** `OliveAndVineHK/Minty` PR #356 (`ui/entity-list`). That repo has
 no shared git history with this one, so this was a manual port, not a
@@ -19,22 +19,12 @@ cherry-pick. Four things were changed on the way across — see
 > landed 8 hours early on any session not running in UTC (`tests/test_hub_entity_list.py`
 > pins the fix). The list's query lives in `blueprints/entity/services/entity_list.py::
 > build_entity_list` — no `status != "deleted"` filter (`entity_status` has no such value) and
-> the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has two readers: the Jinja
-> page, and `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the
-> browser to (always, since phase 2) ([entities-and-members.md](entities-and-members.md)).
-> The API sends the instant as ISO; minty-web renders it in the viewer's zone.
-
-> **Current state (2026-09-29) — read this before sections 5a and 5b, which describe the
-> original port.** Since the schema rebase `entities.last_accessed_at` is a **`TIMESTAMPTZ`**,
-> and `record_entity_access` writes an **aware UTC instant** (`datetime.now(timezone.utc)`): a
-> timestamptz reads a NAIVE value in the session's zone, so the naive write it used to make
-> landed 8 hours early on any session not running in UTC (`tests/test_hub_entity_list.py`
-> pins the fix). The list's query lives in `blueprints/entity/services/entity_list.py::
-> build_entity_list` — no `status != "deleted"` filter (`entity_status` has no such value) and
-> the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has two readers: the Jinja
-> page, and `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the
-> browser to (always, since phase 2) ([entities-and-members.md](entities-and-members.md)).
-> The API sends the instant as ISO; minty-web renders it in the viewer's zone.
+> the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has one reader:
+> `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the browser to
+> ([entities-and-members.md](entities-and-members.md)). The API sends the instant as ISO;
+> minty-web renders it in the viewer's zone. Flask's Jinja list went in phase 2 (2026-10-05) and
+> Flask has drawn no page at all since 2026-10-20, so the template parts of sections 2, 3 and 5
+> below are the original port's history; the badges are minty-web's (`/entities`).
 
 ---
 
@@ -93,8 +83,8 @@ them separate in your head and this gets much easier.
    record_entity_access()                rows → list of dicts
           │                                    │
           ▼                                    ▼
-   UPDATE entities SET                    index.html renders
-     last_accessed_at = now,              the badges
+   UPDATE entities SET                    GET /api/me/entities →
+     last_accessed_at = now,              minty-web draws the badges
      last_accessed_by_user_id = me
 ```
 
@@ -114,7 +104,7 @@ Six files. Read them in this order the first time.
 | 3 | [`migrations/e1a01_add_entity_last_accessed.sql`](../../migrations/e1a01_add_entity_last_accessed.sql) | The same change as hand-written SQL — **this is the one you actually run**, see section 6 |
 | 4 | [`blueprints/entity/routes/modules.py`](../../blueprints/entity/routes/modules.py) | `record_entity_access()` — the write side |
 | 5 | [`blueprints/entity/routes/list.py`](../../blueprints/entity/routes/list.py) | `entity_list()` — the read side |
-| 6 | [`templates/entity/index.html`](../../templates/entity/index.html) | Draws the badges |
+| 6 | minty-web's `/entities` (not in this repo) | Draws the badges (Flask's `templates/entity/index.html` did until phase 2) |
 
 ---
 
@@ -313,10 +303,8 @@ organizations = [
 ```
 
 **This changed the shape of `organizations`** — it used to be SQLAlchemy `Row`
-objects, it is now a list of plain dicts. Jinja doesn't care (`org.name` works on
-both), but Python code would. [`index.html`](../../templates/entity/index.html) is
-the only consumer, so nothing else needed changing — worth re-checking if you add
-another.
+objects, it is now a list of plain dicts. Its consumer then was the Jinja list (deleted in
+phase 2); today it is `GET /api/me/entities`.
 
 ### Why `_format_last_accessed` looks odd
 
@@ -329,31 +317,6 @@ The obvious way to write `9 Jun 5:42 PM` is `strftime("%-d %b %-I:%M %p")`. The
 They work on Linux and macOS and raise `ValueError` on Windows. Since people
 develop on Windows here and deploy to Linux, that's a bug that only appears on
 one of the two. Building the string by hand works everywhere.
-
-### 5c. The template
-
-Standard Jinja. Two structural points.
-
-**The search filter.** The class `entity-item` and the `data-name` attribute moved
-from the `<a>` onto a wrapping `<div>`:
-
-```html
-<div class="entity-item relative" data-name="{{ org.name }}">
-  {% if org.status == 'onboarding' %}<span class="absolute -top-2 …">Setup in progress</span>{% endif %}
-  <a class="…">…</a>
-</div>
-```
-
-The `filterCompanies()` function at the bottom of the template finds
-`.entity-item` and toggles Tailwind's `hidden` class on it. The "Setup in
-progress" pill is positioned *outside* the `<a>` so it can float over the card's
-top edge — which means it has to live inside the wrapper too, or a filtered-out
-card would hide while its pill stayed on screen. **If you restructure this
-markup, keep `entity-item` and `data-name` on the outermost element.**
-
-**The clock's two branches** are a plain `{% if org.last_accessed_display %}` /
-`{% else %}`. The `if` branch adds the hover tooltip; the `else` branch renders
-the same icon in grey with no tooltip.
 
 ---
 
@@ -449,12 +412,11 @@ revert is worth investigating — nobody has established what prompted it.
 # 1. Apply the SQL (section 6) to your local database.
 
 # 2. Confirm nothing is broken.
-python -m pytest tests/test_entity_list_flash_drain.py \
+python -m pytest tests/test_hub_entity_list.py \
                  tests/test_entity_selection_flow.py \
                  tests/test_entity_context_routes.py -q
-# expect: 27 passed
 
-# 3. Start the app, open Select Company.
+# 3. Start Flask and minty-web, open Select Company (minty-web's /entities).
 #    - every clock grey  → correct on a fresh database
 #    - click a company, go back, reload
 #    - that company's clock is now dark; hover shows the time and your name

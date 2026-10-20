@@ -221,8 +221,16 @@ def test_a_member_without_settings_rights_cannot_change_methods(shop, client, ap
     assert resp.status_code == 403
 
 
+def sales_read(client, app, owner, entity) -> dict:
+    """The report wizard's Sales step for 2026-09-01, as the Petty Cash API reads it."""
+    resp = client.get(f"/api/petty-cash/v1/companies/{entity.id}/reports/sales",
+                      query_string={"transaction_date": "2026-09-01"}, headers=F.petty_cash_headers(app, owner.id))
+    assert resp.status_code == 200, resp.get_json()
+    return resp.get_json()
+
+
 def test_methods_switched_on_are_the_ones_the_sales_form_offers(shop, client, app):
-    """Settings and the report wizard agree: what is enabled here is what the sales page shows."""
+    """Settings and the report wizard agree: what is enabled here is what the sales step shows."""
     owner, entity = shop
     client.post("/api/onboarding/sales-methods", headers=bearer(app, owner),
                 json={"entity_id": entity.id, "electronic": ["Visa", "Alipay"], "delivery": ["Foodpanda"]})
@@ -230,12 +238,8 @@ def test_methods_switched_on_are_the_ones_the_sales_form_offers(shop, client, ap
     from test_char_report_lifecycle import open_report
 
     open_report(client, entity, date(2026, 9, 1))
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/sale?transaction_date=2026-09-01")
 
-    assert page.status_code == 200
-    html = page.get_data(as_text=True)
-    for name in ("Visa", "Alipay", "Foodpanda"):
-        assert name in html
+    assert sorted(m["name"] for m in sales_read(client, app, owner, entity)["methods"]) == ["Alipay", "Foodpanda", "Visa"]
     offered = F.enabled_sales_methods(app, entity.id)
     assert sorted(n for _, n in offered.values()) == ["Alipay", "Foodpanda", "Visa"]
 
@@ -243,7 +247,7 @@ def test_methods_switched_on_are_the_ones_the_sales_form_offers(shop, client, ap
 # ---- C3: the catalogue is global, Cash is the 'other' bucket, the sales page follows ----------
 
 
-def test_the_sales_page_offers_one_input_per_enabled_method_plus_cash(shop, client, app):
+def test_the_sales_step_offers_one_input_per_enabled_method_plus_cash(shop, client, app):
     owner, entity = shop
     client.post("/api/onboarding/sales-methods", headers=bearer(app, owner),
                 json={"entity_id": entity.id, "electronic": ["Visa", "Alipay"], "delivery": ["Foodpanda"]})
@@ -253,21 +257,20 @@ def test_the_sales_page_offers_one_input_per_enabled_method_plus_cash(shop, clie
     from test_char_report_lifecycle import open_report
 
     open_report(client, entity, date(2026, 9, 1))
-    html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/sale?transaction_date=2026-09-01").get_data(as_text=True)
+    page = sales_read(client, app, owner, entity)
 
-    assert 'name="sales[shop_sales][visa]"' in html
-    assert 'name="sales[delivery_sales][foodpanda]"' in html
-    assert 'name="sales[shop_sales][alipay]"' not in html, "a method switched off is not offered"
-    assert "sales[shop_sales][cash]" in html, "cash always has its own line"
+    offered = {m["value_name"]: m["type"] for m in page["methods"]}
+    assert offered["visa_sales"] == "electronic" and offered["foodpanda_sales"] == "delivery"
+    assert "alipay_sales" not in offered, "a method switched off is not offered"
+    assert "cash_sales" in page, "cash always has its own line"
 
 
 def test_a_new_company_starts_with_cash_in_the_other_bucket(world_admin, client, app):
     """Creating a company links the default methods; Cash is type 'other', keyed cash_sales."""
+    resp = client.post("/api/onboarding/create", headers=bearer(app, world_admin),
+                       json={"entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD"})
+    assert resp.status_code in (200, 201), resp.get_json()
     F.login(client, world_admin)
-    client.post("/entity/create", data={
-        "entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD",
-        "contact_phone": "91234567", "business_email": "shop@test.com",
-    })
     from models.db import Entity
 
     with app.app_context():
@@ -327,10 +330,10 @@ def test_switching_a_method_off_keeps_the_amount_an_old_report_recorded(shop, cl
     open_report(client, entity, day)
     post_sales(client, entity, day, cash="100", by_method={"visa_sales": "250", "alipay_sales": "50"})
 
-    def sales_page():
-        return client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/sale?transaction_date=2026-09-01").get_data(as_text=True)
+    def offered():
+        return {m["value_name"]: m["amount"] for m in sales_read(client, app, owner, entity)["methods"]}
 
-    assert "50" in sales_page()
+    assert offered()["alipay_sales"] == 50
     ids = {m["name"]: m["id"] for m in methods_api(client, entity)}
     assert client.delete(f"/api/entities/{entity.id}/payment-methods/{ids['Alipay']}").status_code == 200
 
@@ -342,4 +345,4 @@ def test_switching_a_method_off_keeps_the_amount_an_old_report_recorded(shop, cl
         report = Report.query.filter_by(company=entity.id).one()
         totals = sum_sales_by_type(report.id)
     assert totals == {"electronic": 300.0, "delivery": 0.0, "cash": 0.0}, totals
-    assert 'name="sales[shop_sales][alipay]"' not in sales_page(), "but the form no longer offers it"
+    assert "alipay_sales" not in offered(), "but the sales step no longer offers it"

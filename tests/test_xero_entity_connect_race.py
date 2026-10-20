@@ -259,7 +259,7 @@ def test_no_financial_year_end_fails_the_connect(monkeypatch):
         response = xero_routes.xero_callback()
 
     assert response.status_code == 302
-    assert response.location == "/entity.entity_create_success"
+    assert response.location == "/entity.entity_list"
     assert entity_a.xero_org_id is None and entity_a.status is None
     assert entity_a.financial_year_end_day is None
     assert session.commit_calls == 0

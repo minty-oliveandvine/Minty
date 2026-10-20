@@ -265,11 +265,11 @@ def seed_sales_methods(db, owner, entity, *, electronic=("Visa", "Alipay"), deli
 
 
 def enabled_sales_methods(app, entity_id):
-    """value_name -> (type, sale_name) for the methods the sales form will show."""
-    from blueprints.report.routes.sales import get_unique_sale_info_for_entity
+    """value_name -> (type, sale_name) for the company's enabled sales methods."""
+    from blueprints.report.services.sales import sales_methods
 
     with app.app_context():
-        return {m.value_name: (m.type, m.sale_name) for m in get_unique_sale_info_for_entity(entity_id)}
+        return {m.value_name: (m.type, m.sale_name) for m in sales_methods(entity_id)}
 
 
 def denomination_fields(app, entity_id):

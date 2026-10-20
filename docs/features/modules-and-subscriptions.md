@@ -1,12 +1,12 @@
 # Modules and subscriptions
 
-Two modules can be on for a company: **Petty Cash** (this app's daily report) and
+Two modules can be on for a company: **Petty Cash** (the daily report - minty-petty-cash-web) and
 **Payment Request** (`BILL` — the bills module served by `minty-payment-request-web` +
 `minty-payment-request-api`). Whether a company *has* a module, and whether anyone *pays* for it, are
 separate questions.
 
 > **The engine is gone from Flask (2026-10-06).** Subscriptions are `../minty-subscription-api`
-> (Django, :8000 - `docs/features/subscriptions-api.md` there is the route-by-route map) and
+> (Django, :8001 - `docs/features/subscriptions-api.md` there is the route-by-route map) and
 > `../minty-web` (Next.js, :3000 - `docs/features/subscriptions.md`): the engine, the payer
 > portal, the module settings page, the emails, the CLI and the daily pass. Flask's copy - the
 > 24 `blueprints/subscription/services/*` modules, `routes/portal.py` (`/api/me/*`), the onboarding
@@ -30,12 +30,11 @@ minty-subscription-api only since 2026-10-06 (Flask has no pass any more).
 ## 2. Module access (always on)
 
 `entity_function` is the catalogue (`PETTY_CASH`, `PAYMENT_REQUEST`), `entity_function_map`
-the per-company switches. `blueprints/entity/services/modules.py` (`set_entity_module`, `apply_module_selections`) and the
-context processors in
-`pettycash/core/hooks.py` (`is_pettycash_enabled`, `is_billing_enabled` — keyed on
-`MODULE_BILL`) decide what the side panel, the settings tabs and the dashboard show; a
-page of a module that is off renders `entity_no_permission.html` (with a link to the
-module settings when the person may open them). The module token minted
+the per-company switches, set through `blueprints/entity/services/modules.py`
+(`set_entity_module`, `apply_module_selections`) and read by `_is_module_enabled`. A route of a
+module that is off (`services/authz.py::require_module`) answers a JSON caller 403 with `reason`,
+and sends a browser to the company list with the sentence as a warning notice (Flask's
+"Module not active" page went 2026-10-20). The module token minted
 for the payment app carries `billing_enabled` / `petty_cash_enabled`, but minty-payment-request-api
 re-reads the map (`/api/auth/entitlements`) — the database decides, not the claim.
 
@@ -51,8 +50,8 @@ Alembic and `models.db`; `tests/test_zz_no_stripe.py` fails if anything else in
 
 - `payer_for_entity`, `rows_for_entity`, `entities_paid_for_by`, `pending_transfer_for_entity` -
   the membership guards: the payer cannot be removed, demoted or deactivated, and someone a
-  handover is offered to cannot be demoted (`user_management/services/roles.py`,
-  `approve_reject_access.py`, the Users tab's subscriber mark in `entity/routes/hub_settings.py`);
+  handover is offered to cannot be demoted (`user_management/services/roles.py`, the Users tab's
+  subscriber mark in `entity/routes/hub_settings.py`);
 - `module_is_paid` - the manual module switch (§2);
 - `subscription_attention_for_entities` - the entity list's subscription flags
   (`entity/services/entity_list.py`, served to minty-web by `GET /api/me/entities`), one read of
@@ -70,15 +69,12 @@ Alembic and `models.db`; `tests/test_zz_no_stripe.py` fails if anything else in
     is past due. Fail-soft like the badge: an error is no flags, logged. If the engine's rule
     changes, change this mirror with it.
 
-**The dashboard notice.** The Petty Cash dashboard shows the subscription notice once per company
-per login (`entity/services/modules.py::claim_subscription_notice`, `NOTICE_SEEN_SESSION_KEY`;
-`?notice=1` re-shows it in debug). The notice itself comes from minty-subscription-api's
-`GET /api/entities/{id}/subscription-notice`, asked server-side by `services/subscription_api.py::
-fetch_notice` as the person viewing (a five-minute token Flask mints with the shared `SECRET_KEY`,
-naming the person and the company); any failure is no notice, logged. Two kinds: `past_due` and a
-paid `pending_cancel`. The button, "Go to subscription settings", is
-`minty_web_module_page_handoff` → minty-web's Module page. minty-payment-request-web's landing
-page reads the same endpoint itself.
+**The subscription notice is not Flask's.** Flask's dashboard notice (`claim_subscription_notice`,
+`services/subscription_api.py`) went with its Petty Cash pages on 2026-10-20; minty-petty-cash-web
+and minty-payment-request-web ask minty-subscription-api's
+`GET /api/entities/{id}/subscription-notice` themselves. What Flask still provides is the login id
+(`LOGIN_SID_SESSION_KEY`, the module token's `sid` claim), stamped at every sign-in, which those
+apps key "once per sign-in" by.
 
 **The doors to minty-web.**
 - The **Module tab** (`GET /entity/<co>/settings/modules`) is a **hand-over**: the route mints
@@ -86,11 +82,10 @@ page reads the same endpoint itself.
   `MINTY_WEB_URL/landing?next=/entity/<shortid>/<name>/settings/modules` (`modules.py::minty_web_company_path`; `/subscription/entities/…/modules` until phase 2) (`tests/test_minty_web_handoff.py`;
   the page's Back returns to wherever the person came from, so nothing is carried). The page is minty-web's (Part 2 step 4a,
   `../minty-web/docs/features/subscriptions.md` §9) and posts its actions to
-  minty-subscription-api. Flask's Jinja module page and its 20 session routes were deleted on
-  2026-10-01.
+  minty-subscription-api.
 - `GET /handoff/minty-web?next=&entity_id=` - login-gated re-entry when minty-web's token lapses
   (a scoped token with `entity_id`, unscoped without; `next` is a path only). The subscription
-  emails and the notice link through it.
+  emails link through it.
 - `GET /entity/<co>/settings/payment-request` - the Payment Request Settings tab as a URL (the
   redirect `billing_settings_app_url` builds, since only Flask mints the payments-app token;
   `tests/test_settings_payments_redirect.py`).
@@ -112,9 +107,7 @@ minty-subscription-api ships (`billing/static/email/`).
 ## Tests
 
 `tests/test_subscription_store_ro.py` (each read over real rows), `tests/test_subscription_notice.py`
-(the once-per-login claim, the login id, `fetch_notice`), `tests/test_zz_no_stripe.py` (the
-guard), `tests/test_module_access_gate.py` (the gate fails closed),
-`tests/test_membership_removal_guards.py`, `tests/test_minty_web_handoff.py` (the Module tab is a
-hand-over, and nothing else answers under it); Minty's `e2e/03_settings.spec.ts` reads that
-redirect. The ~45 engine test files went with the engine on 2026-10-06; their Django twins are
+(the login id), `tests/test_zz_no_stripe.py` (the guard), `tests/test_module_access_gate.py` (the
+gate fails closed), `tests/test_membership_removal_guards.py`, `tests/test_minty_web_handoff.py`
+(the Module tab is a hand-over, and nothing else answers under it). The ~45 engine test files went with the engine on 2026-10-06; their Django twins are
 minty-subscription-api's suite.

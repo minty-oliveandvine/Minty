@@ -1,7 +1,7 @@
 """Email addresses are English only: printable ASCII (the user's call, 2026-10-01).
 
-The browser half is ``static/js/email_input.js`` (minty-web's ``lib/emailInput.ts`` twin): it
-strips anything else as it is typed and shows ``EMAIL_ASCII_MESSAGE``. This is the half a
+The browser half is each front end's (minty-web's ``lib/emailInput.ts``): it strips anything
+else as it is typed and shows ``EMAIL_ASCII_MESSAGE``. This is the half a
 direct request cannot skip — every path that writes or keys on a typed address (invite, OTP
 sign-in and sign-up, profile, business email, billing email) refuses one with a character
 outside 0x21-0x7E, loudly, in the same words. minty-billing-api says it too

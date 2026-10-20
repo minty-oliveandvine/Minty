@@ -1,33 +1,23 @@
 # Entity create routes.
 
 
-from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from typing import Protocol, cast
 from urllib.parse import urlencode
 
 import jwt
-import pycountry
-from flask import (current_app, flash, jsonify, make_response, redirect,
-                   render_template, request, url_for)
+from flask import (current_app, jsonify, make_response, redirect,
+                   request)
 from flask_login import current_user, login_required
-from iso4217 import Currency
 from loguru import logger
 
 from blueprints.entity import entity_bp
 from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from blueprints.shared.enums import EntityStatus
 from blueprints.shared import bearer_api, preview_origin
-from blueprints.entity.forms import CreateEntityForm
 from blueprints.entity.services.cash_settings import sync_cash_settings
 from blueprints.entity.services.payment_methods import (
     list_sales_methods_grouped, replace_sales_methods)
 from blueprints.entity.services.shared import create_entity_for_user
-
-
-class _PyCountryCountry(Protocol):
-    alpha_2: str
-    name: str
 
 
 # --- Onboarding handoff helpers -------------------------------------------
@@ -243,71 +233,17 @@ def _normalize_business_email(value: str) -> tuple[str | None, str]:
 
 # --- Routes ---------------------------------------------------------------
 
-@entity_bp.route("/entity/success")
-@login_required
-def entity_create_success():
-    entity_id = request.args.get("entity_id") or ""
-    return render_template("entity/entity_create_success.html", entity_id=entity_id)
-
-
-@entity_bp.route("/entity/create", methods=["GET", "POST"])
+@entity_bp.route("/entity/create", methods=["GET"])
 @login_required
 def entity_create():
-    # New entities are created through the onboarding wizard (Step 1). Send the
-    # authenticated user straight there; the legacy POST handler below stays as
-    # a server-side fallback but is no longer reached via the UI.
+    # New entities are created through the onboarding wizard (Step 1). The old Jinja form and its
+    # POST went with Flask's pages on 2026-10-20.
     #
     # fresh=True → emits ?fresh=1 so the wizard starts a brand-new onboarding and
     # ignores any saved session in localStorage. This is the "+" / create-new
     # action: it must NOT resume a previously in-progress entity (that only
     # happens by clicking the in-progress entity row, which passes entity_id).
-    if request.method == "GET":
-        return redirect(onboarding_launch_url(current_user, fresh=True))
-
-    form = CreateEntityForm()
-    countries = cast(Iterable[_PyCountryCountry], pycountry.countries)
-    country_code = [
-        {"country_code": c.alpha_2, "country_name": c.name} for c in countries
-    ]
-    currency_iterable = list(Currency)
-    currencies = [
-        {"currency_code": c.code, "currency_name": c.currency_name}
-        for c in currency_iterable
-    ]
-
-    if request.method == "POST":
-        if form.validate_on_submit():
-            entity, error = create_entity_for_user(
-                current_user.id,
-                form.entity_name.data,
-                _resolve_country_code(form.country_code.data),
-                _resolve_currency_id(form.currency_code.data),
-                status=EntityStatus.DISCONNECTED,  # live at once, no Xero org yet
-            )
-            if error:
-                form.entity_name.errors = [*form.entity_name.errors, error]
-                flash(error, "danger")
-                return redirect(url_for("entity.entity_create"))
-            # The form has always validated these two as required and then
-            # thrown them away; now that the columns exist, persist them. The
-            # form validators already bound the lengths, so the normalizers
-            # here only strip the phone to digits.
-            from models.db import db as _db
-            entity.contact_phone, _ = _normalize_contact_phone(
-                form.contact_phone.data
-            )
-            entity.business_email, _ = _normalize_business_email(
-                form.business_email.data
-            )
-            _db.session.commit()
-            return redirect(url_for("entity.entity_create_success", entity_id=entity.id))
-
-    return render_template(
-        "entity/entity_create.html",
-        country_code=country_code,
-        currencies=currencies,
-        form=form,
-    )
+    return redirect(onboarding_launch_url(current_user, fresh=True))
 
 
 @entity_bp.route("/api/onboarding/server-time", methods=["GET", "OPTIONS"])

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from types import ModuleType, SimpleNamespace
 
-from flask import Blueprint, Flask, flash, get_flashed_messages, jsonify
+from flask import Blueprint, Flask, get_flashed_messages, jsonify
 
 from services import authz
 from services.permission_policy import Permission
@@ -19,11 +19,14 @@ def _build_app() -> Flask:
     def login():
         return "login"
 
-    @auth_bp.route("/no-permission")
-    def no_permission():
-        return "no permission"
-
     app.register_blueprint(auth_bp)
+    entity_bp = Blueprint("entity", __name__)
+
+    @entity_bp.route("/entity")
+    def entity_list():
+        return "companies"
+
+    app.register_blueprint(entity_bp)
     return app
 
 
@@ -163,7 +166,9 @@ def test_require_permission_returns_403_when_denied(monkeypatch):
     assert response.get_json()["message"] == "denied"
 
 
-def test_require_permission_redirects_html_requests_to_no_permission(monkeypatch):
+def test_require_permission_sends_a_browser_to_the_company_list(monkeypatch):
+    """Flask draws no page (2026-10-20): a browser is refused onto ``/entity``, which carries the
+    flashed message to minty-web's company list."""
     app = _build_app()
 
     @authz.require_permission(
@@ -183,97 +188,25 @@ def test_require_permission_redirects_html_requests_to_no_permission(monkeypatch
 
     with app.test_request_context("/protected?entity_id=e-1"):
         response = protected()
-
-    assert response.status_code == 302
-    assert response.location is not None
-    assert response.location.endswith("/no-permission?entity_id=e-1")
-
-
-def test_permission_denied_redirects_html_requests_to_no_permission():
-    app = _build_app()
-
-    with app.test_request_context("/protected?entity_id=e-1"):
-        response = authz.permission_denied("denied", entity_id="e-1")
-
-    assert response.status_code == 302
-    assert response.location is not None
-    assert response.location.endswith("/no-permission?entity_id=e-1")
-
-
-# --- denial reason ----------------------------------------------------------
-#
-# A disabled module and a missing permission used to be indistinguishable by the
-# time they reached /no-permission, so the page could only say "access denied"
-# to someone whose subscription had simply lapsed. The reason rides along now.
-
-
-def test_permission_denial_carries_no_reason():
-    """A real permission denial stays reasonless — the page keeps its old copy."""
-    app = _build_app()
-
-    with app.test_request_context("/protected?entity_id=e-1"):
-        response = authz.permission_denied("denied", entity_id="e-1")
-
-    assert "reason=" not in (response.location or "")
-
-
-def test_permission_denied_forwards_reason_to_no_permission():
-    app = _build_app()
-
-    with app.test_request_context("/protected?entity_id=e-1"):
-        response = authz.permission_denied(
-            "Petty Cash is not activated for this entity.",
-            entity_id="e-1",
-            reason=authz.DENIAL_MODULE_INACTIVE,
-        )
-
-    assert response.status_code == 302
-    assert "entity_id=e-1" in response.location
-    assert f"reason={authz.DENIAL_MODULE_INACTIVE}" in response.location
-
-
-def test_module_denial_does_not_flash():
-    """The page renders its own "Module not active" copy — no duplicate toast."""
-    app = _build_app()
-
-    with app.test_request_context("/protected?entity_id=e-1"):
-        authz.permission_denied(
-            "Petty Cash is not activated for this entity.",
-            entity_id="e-1",
-            reason=authz.DENIAL_MODULE_INACTIVE,
-        )
-        assert get_flashed_messages() == []
-
-
-def test_permission_denial_still_flashes():
-    """Only the module case is silent — the page has no specific copy for this."""
-    app = _build_app()
-
-    with app.test_request_context("/protected?entity_id=e-1"):
-        authz.permission_denied("denied", entity_id="e-1")
         assert get_flashed_messages() == ["denied"]
 
+    assert response.status_code == 302
+    assert response.location == "/entity"
 
-def test_module_denial_suppresses_only_its_own_toast():
-    """The flash channel stays open — an unrelated pending message still drains.
 
-    Suppressing the toast must not disable flashing for the no-permission page
-    generally, or anything queued earlier in the session would vanish with it.
-    """
+def test_permission_denied_sends_a_browser_to_the_company_list():
     app = _build_app()
 
     with app.test_request_context("/protected?entity_id=e-1"):
-        flash("Your session ran out. Mind logging back in?", "warning")
-        authz.permission_denied(
-            "Petty Cash is not activated for this entity.",
-            entity_id="e-1",
-            reason=authz.DENIAL_MODULE_INACTIVE,
-        )
-        assert get_flashed_messages() == ["Your session ran out. Mind logging back in?"]
+        response = authz.permission_denied("denied", entity_id="e-1")
+        assert get_flashed_messages() == ["denied"]
+
+    assert response.status_code == 302
+    assert response.location == "/entity"
 
 
-def test_module_denial_keeps_everything_but_the_toast():
-    """Redirect, entity_id and reason all survive the suppressed flash."""
+def test_a_module_denial_says_why_on_the_company_list():
+    """No page shows "Module not active" any more, so the message itself is the notice."""
     app = _build_app()
 
     with app.test_request_context("/protected?entity_id=e-1"):
@@ -282,16 +215,14 @@ def test_module_denial_keeps_everything_but_the_toast():
             entity_id="e-1",
             reason=authz.DENIAL_MODULE_INACTIVE,
         )
-        assert get_flashed_messages() == []
+        assert get_flashed_messages() == ["Petty Cash is not activated for this entity."]
 
     assert response.status_code == 302
-    assert "/no-permission" in response.location
-    assert "entity_id=e-1" in response.location
-    assert f"reason={authz.DENIAL_MODULE_INACTIVE}" in response.location
+    assert response.location == "/entity"
 
 
-def test_module_denial_json_body_is_unaffected_by_flash_suppression():
-    """API callers never saw the toast, so they must still get the message."""
+def test_module_denial_json_body_carries_the_reason():
+    """API callers get the message and the reason, as before."""
     app = _build_app()
 
     with app.test_request_context("/api/protected?entity_id=e-1"):
@@ -308,7 +239,7 @@ def test_module_denial_json_body_is_unaffected_by_flash_suppression():
     assert payload["status"] == "error"
 
 
-def test_require_module_redirect_carries_module_inactive_reason(monkeypatch):
+def test_require_module_sends_a_browser_to_the_company_list(monkeypatch):
     app = _build_app()
 
     @authz.require_module("PETTY_CASH", entity_keys=("entity_id",))
@@ -326,7 +257,7 @@ def test_require_module_redirect_carries_module_inactive_reason(monkeypatch):
         response = protected()
 
     assert response.status_code == 302
-    assert f"reason={authz.DENIAL_MODULE_INACTIVE}" in response.location
+    assert response.location == "/entity"
 
 
 def test_require_module_json_denial_includes_reason(monkeypatch):

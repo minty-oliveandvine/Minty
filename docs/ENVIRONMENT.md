@@ -69,7 +69,7 @@ that hub 3002, subscription API 8004, Flask 5001, payment-request web 3000, paym
 | `ACCOUNTS_API_URL` | `http://localhost:8000` | Flask (`accounts-api.`): its own address in Flask (emailed links, the Xero redirect URI), and how minty-petty-cash-api and minty-petty-cash-web name it (the hand-off, Xero tokens, the deposit correction); required outside development |
 | `PETTY_CASH_URL` | `http://localhost:8000` | **transitional alias of `ACCOUNTS_API_URL` - still Flask**, not Petty Cash web. Flask reads it when `ACCOUNTS_API_URL` is unset (`services/app_runtime/env.accounts_api_url`); the other apps still call Flask by this name (about 300 references) until the rename follow-up |
 | `PETTY_CASH_API_URL` | `http://localhost:8010` | the Django Petty Cash API (`pettycash-api.`), as minty-petty-cash-web reads it |
-| `PETTY_CASH_WEB_URL` | `http://localhost:3010` | Petty Cash web (`pettycash.`): Flask's `/handoff/petty-cash-web` target, the CORS origin of its Petty Cash API, and - only when set - where the sidebar of Flask's own pages sends Petty Cash's Dashboard and Reports (through that hand-off) |
+| `PETTY_CASH_WEB_URL` | `http://localhost:3010` | Petty Cash web (`pettycash.`): where Flask hands Petty Cash to in every environment - `/handoff/petty-cash-web`'s target, which Flask's old dashboard, history and Petty Cash Settings addresses always redirect into, and the `/Minty_Report/<path>/` share-link redirect - and the CORS origin of Flask's Petty Cash API and hub routes. Flask has no Petty Cash pages to fall back on since 2026-10-20, so there is no "unset" behaviour: unset is the local default |
 | `PAYMENT_REQUEST_WEB_URL` | `http://localhost:3020` | payment-request web |
 | `PAYMENT_REQUEST_API_URL` | `http://localhost:8020` | payment-request API |
 | `ONBOARDING_WEB_URL` | `http://localhost:3030` | onboarding web |
@@ -164,17 +164,19 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 
 **Petty Cash (`Minty`, Flask)**
 - Required: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `S3_URL`, `ACCOUNTS_API_URL` (or its
-  alias `PETTY_CASH_URL`), `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL`,
-  `ONBOARDING_WEB_URL`, `PETTY_CASH_WEB_URL`, `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`,
-  `SPIRE_KEY`, `SMTP_URL`, `MAIL_FROM` (start-up enforces `SECRET_KEY`, `DATABASE_URL` and
-  `S3_URL`, and outside development `ACCOUNTS_API_URL` or `PETTY_CASH_URL`; without `SMTP_URL`
-  no mail is sent).
-  `SUBSCRIPTION_API_URL` is also read server-side: the dashboard's subscription notice.
-  No `STRIPE_*`, `SUBSCRIPTION_SCHEDULER_*` or `SUBSCRIPTION_EMAIL` since 2026-10-06 (Flask's
-  subscription engine was deleted; nothing reads them).
+  alias `PETTY_CASH_URL`), `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL`, `ONBOARDING_WEB_URL`,
+  `PETTY_CASH_WEB_URL`, `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `SMTP_URL`, `MAIL_FROM`
+  (start-up enforces `SECRET_KEY`, `DATABASE_URL` and `S3_URL`, and outside development
+  `ACCOUNTS_API_URL` or `PETTY_CASH_URL`; without `SMTP_URL` no mail is sent).
+  **No longer read since 2026-10-20** (Flask became backend only): `SPIRE_KEY` (the docx/PDF
+  export), `SUBSCRIPTION_API_URL` (the dashboard's subscription notice and the template
+  sidebar's Subscriptions Overview) and `DD_CLIENT_TOKEN` (the pages' Datadog browser logs).
+  They are still set on the hosts and in `minty-infra`, and can be dropped there in a later
+  infra change. No `STRIPE_*`, `SUBSCRIPTION_SCHEDULER_*` or `SUBSCRIPTION_EMAIL` since
+  2026-10-06 (Flask's subscription engine was deleted; nothing reads them).
 - Optional: `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
   legal flags (`REQUIRE_TERMS_AT_SIGNUP`, `CURRENT_TERMS_VERSION`, `CURRENT_PRIVACY_VERSION`),
-  `INVITATION_*`, `AUTO_SUPERUSER_EMAILS`, `DD_CLIENT_TOKEN`, `LOG_LEVEL`, `SESSION_TYPE`,
+  `INVITATION_*`, `AUTO_SUPERUSER_EMAILS`, `LOG_LEVEL`, `SESSION_TYPE`,
   `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker), `PREVIEW_ORIGIN_REGEX`.
 
 **Payment Request API (`minty-payment-request-api`, Django)**
@@ -337,10 +339,11 @@ backend host answered its health check on 2026-10-13.
   November):** Flask becomes `accounts-api.`, and `pettycash.` passes to the Next.js Petty Cash
   web app, beside the Django `pettycash-api.`. Branch previews of Petty Cash web are
   `pr-<slug>-pettycash.dailyminty.com` (Flask hands back to them: `blueprints/shared/preview_origin.py`).
-  **Until minty-infra's Step 5 apply**, Flask still serves `pettycash.dailyminty.com`
-  (production) and `dev-petty-cash-api.dailyminty.com` (development), and the two Petty Cash
-  rows are not hosted. Xero lists only `https://pettycash.dailyminty.com/callback` until the
-  owner registers the accounts-api callbacks (§7), so Xero connect fails on development.
+  Applied in development on 2026-10-19 and in production on 2026-10-20 (`minty-infra/CUTOVER.md`
+  §8). Flask draws no page since 2026-10-20 (backend only): every Petty Cash address it still
+  answers hands over to `PETTY_CASH_WEB_URL`. `https://accounts-api.dailyminty.com/callback` is
+  registered with Xero; the old `https://pettycash.dailyminty.com/callback` is removed once
+  production Xero connect is verified (§7).
 - `payment-backend.dailyminty.com` is the old Payment Request API host; nothing reads it.
 
 - **The hub is `my.dailyminty.com`** (corrected 2026-10-09; this table said `login.` and was

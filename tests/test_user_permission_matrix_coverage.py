@@ -344,8 +344,8 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
         # proves every one of them by its refusal.
         # ``entity_create`` (ENTITY_CREATE) is not in this list: the rule is "any signed-in
         # user" (services/permission_policy.has_permission), which ``@login_required`` on the
-        # route already is - the GET redirects to the onboarding wizard, the POST is the
-        # legacy fallback. ENTITY_CREATE stays in the matrix as the statement of that rule.
+        # route already is - it only redirects to the onboarding wizard (the legacy POST went
+        # 2026-10-20). ENTITY_CREATE stays in the matrix as the statement of that rule.
         # ``delete_entity`` (ENTITY_DELETE) went with the entity soft-delete in C2 of
         # docs/modernisation/modernisation_plan.md: entity_status has no 'deleted' and nothing linked to
         # the route. The permission stays in the matrix for the day a real delete exists.
@@ -386,37 +386,18 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "get_entity_xero_data",
             "XERO_SETTINGS_VIEW",
         ),
+        # Flask's report wizard went with its HTML (2026-10-20): the Petty Cash API's routes
+        # (blueprints/petty_cash_api/) carry the report permissions now.
         (
-            "blueprints/report/routes/submitted.py",
-            "report_submitted_publish_to_xero",
+            "blueprints/petty_cash_api/routes/report.py",
+            "publish_answer",
             "REPORT_PUBLISH",
         ),
-        ("blueprints/report/routes/create.py", "create_report", "REPORT_EDIT_OWN"),
-        (
-            "blueprints/report/routes/opening.py",
-            "report_opening",
-            "REPORT_EDIT_OWN",
-        ),
-        (
-            "blueprints/report/routes/sales.py",
-            "report_sale",
-            "REPORT_EDIT_OWN",
-        ),
-        (
-            "blueprints/report/routes/expense.py",
-            "report_expense",
-            "REPORT_EDIT_OWN",
-        ),
-        (
-            "blueprints/report/routes/cash_count.py",
-            "report_cash_count",
-            "REPORT_EDIT_OWN",
-        ),
-        (
-            "blueprints/report/routes/deposit.py",
-            "report_deposit",
-            "REPORT_EDIT_OWN",
-        ),
+        # every report step's route asks ``_may_edit`` (test_report_steps_ask_may_edit below)
+        ("blueprints/petty_cash_api/routes/opening.py", "_may_edit", "REPORT_EDIT_OWN"),
+        ("blueprints/report/services/report_edits.py", "check_editable", "REPORT_EDIT_OWN"),
+        ("blueprints/report/services/report_actions.py", "reopen_report", "REPORT_EDIT_OWN"),
+        ("blueprints/petty_cash_api/routes/home.py", "correct_deposit", "REPORT_EDIT_ENTITY"),
     ],
 )
 def test_matrix_routes_use_expected_permission_checks(path, function_name, permission):
@@ -435,17 +416,44 @@ def test_matrix_routes_use_expected_permission_checks(path, function_name, permi
     )
 
 
+@pytest.mark.parametrize(
+    ("path", "function_name"),
+    [
+        ("blueprints/petty_cash_api/routes/opening.py", "opening_page"),
+        ("blueprints/petty_cash_api/routes/opening.py", "save_opening_step"),
+        ("blueprints/petty_cash_api/routes/sales.py", "sales_page"),
+        ("blueprints/petty_cash_api/routes/sales.py", "save_sales_step"),
+        ("blueprints/petty_cash_api/routes/expenses.py", "expenses_page"),
+        ("blueprints/petty_cash_api/routes/expenses.py", "add_expense_line"),
+        ("blueprints/petty_cash_api/routes/expenses.py", "save_expenses_step_route"),
+        ("blueprints/petty_cash_api/routes/expenses.py", "edit_expense_line"),
+        ("blueprints/petty_cash_api/routes/cash.py", "_read"),
+        ("blueprints/petty_cash_api/routes/cash.py", "save_deposit_step"),
+        ("blueprints/petty_cash_api/routes/cash.py", "save_cash_count_step"),
+        ("blueprints/petty_cash_api/routes/close.py", "close_page"),
+        ("blueprints/petty_cash_api/routes/close.py", "submit_day"),
+    ],
+)
+def test_report_steps_ask_may_edit(path, function_name):
+    assert _has_call_name(_read_function(ROOT / path, function_name), "_may_edit")
+
+
 def test_entity_settings_entity_has_coa_and_entity_update_checks():
+    # The door (a hand-off since 2026-10-20) checks COA_VIEW; the saves are the Petty Cash
+    # API's, which ask for every right the old page's form did.
     function_node = _read_function(
         ROOT / "blueprints/entity/routes/settings.py",
         "entity_settings_entity",
     )
-
     assert _has_decorator_permission(function_node, "COA_VIEW")
-    assert _has_call_with_permission(function_node, "has_permission", "ENTITY_UPDATE")
-    assert _has_call_with_permission(function_node, "has_permission", "COA_UPDATE")
-    assert _has_call_with_permission(function_node, "has_permission", "COA_CREATE")
-    assert _has_call_with_permission(function_node, "has_permission", "COA_DELETE")
+
+    from blueprints.petty_cash_api.routes.settings import COUNTRY_RIGHTS
+
+    assert set(COUNTRY_RIGHTS) == {"ENTITY_UPDATE", "COA_UPDATE", "COA_CREATE", "COA_DELETE"}
+    xero_settings = _read_function(
+        ROOT / "blueprints/petty_cash_api/routes/settings.py", "xero_settings_answer"
+    )
+    assert _has_call_with_permission(xero_settings, "has_permission", "COA_VIEW")
 
 
 @pytest.mark.parametrize(
@@ -493,14 +501,14 @@ def test_sales_method_service_functions_reference_expected_permissions(
 @pytest.mark.parametrize(
     ("path", "function_name", "helper", "expected_permission"),
     [
-        ("blueprints/report/routes/report_detail.py", "report_detail", "can_view_report", None),
-        ("blueprints/report/routes/report_detail.py", "edit_report", "has_permission", "REPORT_EDIT_OWN"),
+        ("blueprints/petty_cash_api/routes/report.py", "_report", "can_view_report", None),
+        ("blueprints/petty_cash_api/routes/history.py", "report_history", "has_permission", "REPORT_EDIT_OWN"),
         # the route delegates to the shared delete (2026-10-15); the check lives there
         ("blueprints/report/services/report_actions.py", "delete_report", "can_delete_report", None),
-        ("blueprints/report/routes/submitted.py", "report_submitted", "can_view_report", None),
-        ("blueprints/report/routes/export_screenshot.py", "generate_pdf_report", "can_view_report", None),
-        ("blueprints/report/routes/export_screenshot.py", "report_screenshot", "can_view_report", None),
-        ("blueprints/report/routes/history.py", "entity_report_history", "has_permission", "REPORT_EDIT_ENTITY"),
+        ("blueprints/petty_cash_api/routes/close.py", "report_outcome", "can_view_report", None),
+        ("blueprints/petty_cash_api/routes/expenses.py", "expense_receipt", "can_view_report", None),
+        ("blueprints/petty_cash_api/routes/expenses.py", "delete_expense_line", "can_delete_report", None),
+        ("blueprints/report/services/report_csv.py", "may_export", "has_permission", "REPORT_VIEW_ENTITY"),
     ],
 )
 def test_report_routes_use_permission_helpers(path, function_name, helper, expected_permission):

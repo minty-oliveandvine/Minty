@@ -28,10 +28,9 @@ def _auth_redirect() -> ResponseReturnValue:
     return redirect(url_for("auth.home"))
 
 
-#: Why a request was refused. Carried to the no-permission page so it can say
-#: something useful instead of the generic "you don't have permission" — a
-#: disabled module is usually a lapsed subscription, which the user can fix
-#: themselves, while a real permission denial is not.
+#: Why a request was refused, for JSON callers (``reason``) so a front end can say something
+#: useful instead of the generic "you don't have permission" — a disabled module is usually a
+#: lapsed subscription, which the user can fix themselves, while a real permission denial is not.
 DENIAL_MODULE_INACTIVE = "module_inactive"
 
 
@@ -43,17 +42,12 @@ def _forbidden(
         if reason:
             payload["reason"] = reason
         return jsonify(payload), 403
-    # No toast for an inactive module: the no-permission page renders its own
-    # "Module not active" copy for that case, so flashing here would say the
-    # same thing twice — once permanently, once for three seconds. Real
-    # permission denials still need the toast; the page only has generic copy
-    # for them. JSON callers get ``message`` either way.
-    if reason != DENIAL_MODULE_INACTIVE:
-        flash(message, "danger")
-    target_kwargs = {"entity_id": entity_id} if entity_id else {}
-    if reason:
-        target_kwargs["reason"] = reason
-    return redirect(url_for("auth.no_permission", **target_kwargs))
+    # Flask draws no page (2026-10-20): a browser goes to the company list, which carries the
+    # flashed message to minty-web's list as a notice. With no "Module not active" page any more,
+    # the message is the whole explanation, so an inactive module flashes too (as a warning:
+    # usually a lapsed subscription the person can put right). JSON callers get ``message``.
+    flash(message, "warning" if reason == DENIAL_MODULE_INACTIVE else "danger")
+    return redirect(url_for("entity.entity_list"))
 
 
 def permission_denied(

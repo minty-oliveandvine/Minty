@@ -1,17 +1,13 @@
-"""The redesigned Petty Cash pages' foundation (Parts 13-15; docs/features/petty-cash-design.md).
+"""What the Petty Cash pages are drawn from (Parts 13-15; docs/features/petty-cash-design.md).
 
-Cheap source checks, no database:
-- minty_tokens.css carries the Part 13 values that matter (the Primary CTA chain, the scrim, the
-  radius and type floor) - it is a copy of @minty/shared's tokens.css and must not drift;
-- no raw colour outside that sheet (Part 13 V-01): pc_ui.css and templates/petty_cash/ bind roles;
-- the icons are Material Symbols Rounded (D-20), never Outlined, and no page loads Tailwind's CDN;
+Cheap checks, no database:
 - the ``money`` filter writes "HKD 4,800.00" (the user's choice, 2026-10-14);
-- the five Daily Closing stages over the wizard's six sections, and the report status tones.
+- the five Daily Closing stages over the wizard's six sections, and the report status tones
+  (``report/services/daily_closing.py``, which the Petty Cash API hands minty-petty-cash-web).
+
+The token sheet, template and icon checks went with Flask's HTML frontend (2026-10-20).
 """
 from __future__ import annotations
-
-import re
-from pathlib import Path
 
 import pytest
 
@@ -24,71 +20,6 @@ from blueprints.report.services.daily_closing import (
     submitted_progress,
 )
 from services.helpers.formatter import money
-
-ROOT = Path(__file__).resolve().parents[1]
-TOKENS = ROOT / "static" / "css" / "minty_tokens.css"
-PC_CSS = ROOT / "static" / "css" / "pc_ui.css"
-PC_TEMPLATES = ROOT / "templates" / "petty_cash"
-HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-
-
-def _tokens() -> dict[str, str]:
-    """The FIRST (light) value of every custom property in the sheet."""
-    found: dict[str, str] = {}
-    for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", TOKENS.read_text(encoding="utf-8")):
-        found.setdefault(name, value.strip())
-    return found
-
-
-@pytest.mark.parametrize(
-    "name, value",
-    [
-        # Primary CTA: Minty Action, hover, pressed (D-02, S4-01) - never brand 400 as a fill
-        ("--minty-mint-action-500", "#3cbcc3"),
-        ("--minty-mint-action-600", "#35b2b9"),
-        ("--minty-mint-action-700", "#2fa4ab"),
-        ("--color-action-primary", "var(--minty-mint-action-500)"),
-        ("--color-action-primary-hover", "var(--minty-mint-action-600)"),
-        ("--color-action-primary-pressed", "var(--minty-mint-action-700)"),
-        ("--color-brand-primary", "var(--minty-brand-400)"),
-        ("--minty-brand-400", "#54d3da"),
-        # scrim #111313 at 48% (S4-04)
-        ("--color-overlay-scrim", "rgb(17 19 19 / 0.48)"),
-        # buttons/inputs radius 12; the 12px type floor
-        ("--radius-lg", "12px"),
-        ("--text-caption", "12px"),
-        ("--text-label", "12px"),
-        ("--text-button", "14px"),
-        # Submitted is Info (blue) in every module
-        ("--color-status-info-ink", "var(--minty-blue-800)"),
-    ],
-)
-def test_the_token_sheet_carries_part_13(name, value):
-    assert _tokens()[name] == value
-
-
-def test_every_semantic_role_is_defined_at_root_not_in_a_tailwind_theme_block():
-    source = TOKENS.read_text(encoding="utf-8")
-    assert not re.search(r"^@theme\s*\{", source, re.M)  # Flask has no Tailwind to read it
-    assert "--color-surface-page:" in source
-
-
-def test_no_raw_colour_outside_the_token_sheet():
-    offenders = []
-    for path in [PC_CSS, *PC_TEMPLATES.rglob("*.html")]:
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            # entity references (&#8230;) are text, not colours
-            for match in HEX.findall(re.sub(r"&#x?[0-9a-fA-F]+;", "", line)):
-                offenders.append(f"{path.relative_to(ROOT)}:{lineno} {match}")
-    assert offenders == []
-
-
-def test_icons_are_rounded_and_there_is_no_tailwind_cdn():
-    for path in PC_TEMPLATES.rglob("*.html"):
-        source = path.read_text(encoding="utf-8")
-        assert "Outlined" not in source and "material-symbols-outlined" not in source, path.name
-        assert "cdn.tailwindcss.com" not in source, path.name
-    assert "Material+Symbols+Rounded" in (PC_TEMPLATES / "base.html").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(

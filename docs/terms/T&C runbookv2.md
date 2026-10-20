@@ -519,7 +519,7 @@ version, minty-web supplies the text.**
   `409 {"error": "document_mismatch"}` and an ERROR log. Omitted, it is not checked.
 
 Both are on the gate's allowed list (§5.2), and an agreement given there is honoured
-by the gate on the next Flask page — it falls back to the database when the session
+by the gate on the next Flask request — it falls back to the database when the session
 has no answer.
 
 ### 4.7 What every other endpoint does now
@@ -564,8 +564,10 @@ nobody can ever escape it:
   them; a client that also sends the session cookie would otherwise be refused
   the very route that lets it agree
 - **log out** — someone who refuses must always be able to leave
-- the login and email-code pages
-- static files (images, styles)
+- the sign-in endpoints: `/`, `/register`, `/auth/notices` and the three email-code routes
+  (Flask's password `/login`, its reset pages and `/no-permission` went on 2026-10-20 with
+  every other Flask page)
+- static files (only the email images are left)
 - health checks used by the server
 
 (`/legal/accept`, `/legal/terms` and `/legal/privacy` were on this list until 2026-10-12.

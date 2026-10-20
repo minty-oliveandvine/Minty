@@ -111,26 +111,17 @@ class TestPublishReportLookupIsTenantScoped:
 
 class TestLoadBearingStatusFilters:
 
-    def test_sales_save_lookup_is_scoped_to_drafts(self):
-        """sales.py's save must only ever find a DRAFT.
+    def test_sales_save_forces_no_status(self):
+        """The sales save must never force a status.
 
         Its old recovery lookup was status-AGNOSTIC and forced status="draft" on
         whatever it found - post-collapse that could UN-SUBMIT a posted report.
-        Since the service extraction (2026-10-14) the save has one lookup, and
-        nothing on the path sets a status (tests/test_report_sales_state.py pins
-        that a submitted day is not saved over).
+        Since the service extraction (2026-10-14) nothing on the path sets a status
+        (tests/test_report_sales_state.py pins that a submitted day is not saved over).
         """
-        src = _source("blueprints/report/routes/sales.py")
-        idx = src.find("report_draft = Report.query.filter_by(")
-        assert idx != -1, "sales.py save lookup (report_draft) not found"
-        block = src[idx:idx + 400]
-        assert 'status="draft"' in block, (
-            "the sales.py save lookup must be constrained to drafts"
+        assert '.status = "draft"' not in _source("blueprints/report/services/sales.py"), (
+            "the sales save must not force a status: that is how a posted report gets un-submitted"
         )
-        for path in ("blueprints/report/routes/sales.py", "blueprints/report/services/sales.py"):
-            assert '.status = "draft"' not in _source(path), (
-                f"{path} must not force a status: that is how a posted report gets un-submitted"
-            )
 
     def test_the_delete_sweeps_no_other_row_of_the_day(self):
         """The old delete also swept "sibling drafts" of the same company and day - it had to be
@@ -155,18 +146,6 @@ class TestLoadBearingStatusFilters:
         block = src[idx:src.find("\ndef ", idx + 1)]
         assert "first_report_defaults(entity_id)" in block
         assert "Report.query" not in block
-
-    def test_statement_export_excludes_drafts_null_safely(self):
-        """The statements export must exclude drafts, NULL-safely.
-
-        `status != 'draft'` evaluates to NULL — not true — for a NULL-status
-        row and silently drops it. r0 PART 1 left NULL-status rows behind.
-        """
-        src = _source("blueprints/report/services/report_detail.py")
-        assert "Report.status.is_(None)" in src, (
-            "submitted-only filters must be NULL-safe: use "
-            'db.or_(Report.status.is_(None), Report.status != "draft")'
-        )
 
 
 # ---------------------------------------------------------------------------

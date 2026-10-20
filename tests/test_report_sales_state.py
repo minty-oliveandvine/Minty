@@ -1,18 +1,16 @@
-"""What the report wizard's Sales step (``report/routes/sales.py``) shows and saves - pinned
-before its logic moves into a service that the Jinja page and the Petty Cash API share
-(minty-petty-cash-web's port of the step, 2026-10-14).
-
-Characterisation: today's behaviour, quirks included - read off the template context for the
-page (GET) and off the database and the flashed message for a save (POST).
+"""The report wizard's Sales step (``report/services/sales.py``), pinned through the Jinja page
+(``report/routes/sales.py``) before its logic moved into that service (minty-petty-cash-web's port,
+2026-10-14). Flask's HTML frontend was deleted 2026-10-20: the step's read and save are
+tests/test_petty_cash_api_sales.py's now; what is left here is what that file does not pin (a
+switched-off method, the totals and history a save writes, a second save, a method with no field,
+the saver, a submitted day), driven through the Petty Cash API's ``/reports/sales``.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import char_factories as F
 import pytest
-from flask import template_rendered
 
 pytestmark = pytest.mark.char
 
@@ -25,10 +23,6 @@ def _hk_today():
 
 TODAY = _hk_today()
 D2, D3 = TODAY - timedelta(days=2), TODAY - timedelta(days=1)
-
-# the methods a new company starts with (entity/services/shared.py::create_default_entity_settings)
-ELECTRONIC = ["Visa", "Alipay", "WeChat Pay", "Mastercard", "UnionPay", "Amex", "Octopus"]
-DELIVERY = ["Food Panda", "Keeta", "OpenRice"]
 
 
 @pytest.fixture
@@ -102,72 +96,29 @@ def _row(app, report_id):
         )}
 
 
-@contextmanager
-def _captured(app):
-    seen = []
-
-    def record(_sender, template, context, **_extra):
-        # the method rows are ORM objects that detach with the request: read them while bound
-        context = dict(context)
-        context["sale_info"] = [
-            {"sale_name": s.sale_name, "value_name": s.value_name, "type": str(s.type), "amount": s.amount}
-            for s in context.get("sale_info") or []
-        ]
-        seen.append((template.name, context))
-
-    template_rendered.connect(record, app)
-    try:
-        yield seen
-    finally:
-        template_rendered.disconnect(record, app)
+def _url(entity):
+    return f"/api/petty-cash/v1/companies/{entity.id}/reports/sales"
 
 
-def _page(app, client, owner, entity, day=None, *, report_id=None):
-    F.login(client, owner)
-    base = f"{F.co(client, entity.id)}/petty-cash/reports"
-    url = f"{base}/{report_id}/sale" if report_id else f"{base}/new/sale"
-    with _captured(app) as seen:
-        resp = client.get(url, query_string={"transaction_date": F.iso(day)} if day else None)
-    assert resp.status_code == 200, resp.data[:300]
-    pages = [ctx for name, ctx in seen if name == "report/sales.html"]
-    assert len(pages) == 1
-    return pages[0]
+def _page(app, client, owner, entity, day):
+    resp = client.get(_url(entity), query_string={"transaction_date": F.iso(day)},
+                      headers=F.petty_cash_headers(app, owner.id))
+    assert resp.status_code == 200, resp.get_json()
+    return resp.get_json()
 
 
-def _save(client, owner, entity, day, *, cash=None, shop=None, delivery=None, action="save_next"):
-    """``shop`` / ``delivery`` map the form's short name ('visa', 'foodpanda') to the typed text."""
-    F.login(client, owner)
-    form = {"entity_id": entity.id, "transaction_date": F.iso(day), "action_type": action}
-    if cash is not None:
-        form["sales[shop_sales][cash]"] = cash
-    for short, amount in (shop or {}).items():
-        form[f"sales[shop_sales][{short}]"] = amount
-    for short, amount in (delivery or {}).items():
-        form[f"sales[delivery_sales][{short}]"] = amount
-    return client.post("/report/sale", data=form)
+def _save(client, owner, entity, day, *, cash=0, amounts=None, action="next"):
+    """``amounts``: value_name -> amount for the Electronic / Delivery methods."""
+    return client.put(_url(entity), json={"transaction_date": F.iso(day), "cash_sales": cash,
+                                          "amounts": amounts or {}, "action": action},
+                      headers=F.petty_cash_headers(client.application, owner.id))
 
 
-def _flashes(client):
-    with client.session_transaction() as sess:
-        return [m for _cat, m in sess.get("_flashes", [])]
+def _names(page, mtype):
+    return [m["name"] for m in page["methods"] if m["type"] == mtype]
 
 
-def _names(ctx, mtype):
-    return [s["sale_name"] for s in ctx["sale_info"] if s["type"] == mtype]
-
-
-# --- the page ---------------------------------------------------------------------------------------
-
-
-def test_the_page_lists_the_companys_methods_in_settings_order(app, client, db, shop):
-    owner, entity = shop
-    _draft(app, db, entity, owner, D3)
-
-    ctx = _page(app, client, owner, entity, D3)
-
-    assert _names(ctx, "electronic") == ELECTRONIC
-    assert _names(ctx, "delivery") == DELIVERY
-    assert [s["value_name"] for s in ctx["sale_info"] if s["type"] == "other"] == ["cash_sales"]
+# --- the read ----------------------------------------------------------------------------------------
 
 
 def test_a_switched_off_method_is_not_shown(app, client, db, shop):
@@ -176,65 +127,23 @@ def test_a_switched_off_method_is_not_shown(app, client, db, shop):
         F.seed_sales_methods(db, owner, entity, electronic=("Visa",), delivery=("Keeta",))
     _draft(app, db, entity, owner, D3)
 
-    ctx = _page(app, client, owner, entity, D3)
+    page = _page(app, client, owner, entity, D3)
 
-    assert _names(ctx, "electronic") == ["Visa"] and _names(ctx, "delivery") == ["Keeta"]
-
-
-def test_with_no_draft_the_page_is_empty(app, client, db, shop):
-    owner, entity = shop
-    ctx = _page(app, client, owner, entity, D3)
-
-    assert ctx["is_draft"] is False and ctx["draft_id"] is None and ctx["current_draft"] is None
-    assert set(ctx["sales_amounts"].values()) == {0.0}
-    assert all(s["amount"] is None for s in ctx["sale_info"])
-    assert ctx["completed_sections"] == ["opening"] and ctx["current_section"] == "sales"
-    assert ctx["transaction_date"] == D3
-
-
-def test_a_draft_brings_back_its_amounts(app, client, db, shop):
-    owner, entity = shop
-    draft = _draft(app, db, entity, owner, D3, cashsale_total=50, completed_sections=["opening", "sales"],
-                   current_section="expenses")
-    _set_amounts(app, db, draft, {"cash_sales": 50, "visa_sales": 30, "foodpanda_sales": 12.5})
-
-    ctx = _page(app, client, owner, entity, D3)
-
-    assert str(ctx["draft_id"]) == draft and ctx["is_draft"] is True
-    assert ctx["sales_amounts"]["cash_sales"] == 50
-    assert ctx["sales_amounts"]["visa_sales"] == 30 and ctx["sales_amounts"]["foodpanda_sales"] == 12.5
-    assert ctx["sales_amounts"]["alipay_sales"] == 0.0  # a method with no row reads as zero
-    amounts = {s["value_name"]: s["amount"] for s in ctx["sale_info"]}
-    assert amounts["visa_sales"] == 30 and amounts["alipay_sales"] is None
-    assert ctx["completed_sections"] == ["opening", "sales"]
-
-
-def test_a_report_opened_by_id_shows_its_amounts(app, client, db, shop):
-    owner, entity = shop
-    report = _draft(app, db, entity, owner, D3, status="submitted", cashsale_total=40)
-    _set_amounts(app, db, report, {"cash_sales": 40, "keeta_sales": 9})
-
-    ctx = _page(app, client, owner, entity, report_id=report)
-
-    assert ctx["sales_amounts"]["cash_sales"] == 40 and ctx["sales_amounts"]["keeta_sales"] == 9
-    assert ctx["is_latest_report"] is True
-    assert ctx["transaction_date"] == D3
+    assert _names(page, "electronic") == ["Visa"] and _names(page, "delivery") == ["Keeta"]
 
 
 # --- saving ---------------------------------------------------------------------------------------
 
 
-def test_save_next_writes_every_method_and_moves_on_to_expenses(app, client, db, shop):
+def test_save_next_writes_every_method_its_totals_and_its_history(app, client, db, shop):
     from models.db import ReportHistory
 
     owner, entity = shop
     draft = _draft(app, db, entity, owner, D3, expense_total=15, bank_deposit=5)
 
-    resp = _save(client, owner, entity, D3, cash="1,000.50", shop={"visa": "200", "alipay": "0"},
-                 delivery={"foodpanda": "33.25"})
+    resp = _save(client, owner, entity, D3, cash=1000.5, amounts={"visa_sales": 200, "foodpanda_sales": 33.25})
 
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/expense?transaction_date={F.iso(D3)}")
+    assert resp.status_code == 200, resp.get_json()
     amounts = _amounts(app, draft)
     assert amounts["cash_sales"] == 1000.5 and amounts["visa_sales"] == 200 and amounts["foodpanda_sales"] == 33.25
     assert amounts["alipay_sales"] == 0 and amounts["openrice_sales"] == 0  # every shown method gets a row
@@ -248,36 +157,15 @@ def test_save_next_writes_every_method_and_moves_on_to_expenses(app, client, db,
     assert [(h.action, h.field_changed) for h in history] == [("updated", "sales_entry")]
 
 
-def test_save_exit_stays_on_sales_and_goes_home(app, client, db, shop):
-    owner, entity = shop
-    draft = _draft(app, db, entity, owner, D3)
-
-    resp = _save(client, owner, entity, D3, cash="10", action="save_exit")
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/petty-cash")
-    row = _row(app, draft)
-    assert row["current_section"] == "sales" and row["completed_sections"] == ["opening", "sales"]
-
-
-def test_a_cleared_method_goes_back_to_zero(app, client, db, shop):
-    owner, entity = shop
-    draft = _draft(app, db, entity, owner, D3)
-    _set_amounts(app, db, draft, {"visa_sales": 80})
-
-    _save(client, owner, entity, D3, cash="5", shop={"visa": ""})
-
-    assert _amounts(app, draft)["visa_sales"] == 0
-
-
 def test_saving_again_closes_on_the_cash_just_typed(app, client, db, shop):
     """Fixed in the service extraction: the closing balance was computed before the cash row was
     rewritten, so a second save closed on the cash typed the time before (170 here)."""
     owner, entity = shop
     draft = _draft(app, db, entity, owner, D3)
 
-    _save(client, owner, entity, D3, cash="50")
+    _save(client, owner, entity, D3, cash=50)
     assert _row(app, draft)["closing_balance"] == 170
-    _save(client, owner, entity, D3, cash="80")
+    _save(client, owner, entity, D3, cash=80)
 
     row = _row(app, draft)
     assert row["cash_sales"] == 80
@@ -298,7 +186,7 @@ def test_a_method_the_page_does_not_show_keeps_its_amount(app, client, db, shop)
     draft = _draft(app, db, entity, owner, D3)
     _set_amounts(app, db, draft, {"tips_sales": 7})
 
-    _save(client, owner, entity, D3, cash="5")
+    _save(client, owner, entity, D3, cash=5)
 
     assert _amounts(app, draft)["tips_sales"] == 7
 
@@ -313,29 +201,18 @@ def test_a_save_makes_the_saver_the_reports_creator(app, client, db, shop):
         db.session.commit()
     draft = _draft(app, db, entity, owner, D3)
 
-    _save(client, clerk, entity, D3, cash="1")
+    _save(client, clerk, entity, D3, cash=1)
 
     assert str(_row(app, draft)["created_by"]) == clerk.id
-
-
-def test_with_no_draft_the_save_sends_you_to_opening(app, client, db, shop):
-    from models.db import Report
-
-    owner, entity = shop
-    resp = _save(client, owner, entity, D3, cash="10")
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/report/opening")
-    assert _flashes(client) == ["I don't see a draft yet - let's start with the opening entry."]
-    with app.app_context():
-        assert Report.query.filter_by(entity_id=entity.id).count() == 0
 
 
 def test_a_submitted_report_for_the_day_is_not_saved_over(app, client, db, shop):
     owner, entity = shop
     report = _draft(app, db, entity, owner, D3, status="submitted", cashsale_total=40, closing_balance=160)
 
-    _save(client, owner, entity, D3, cash="999")
+    resp = _save(client, owner, entity, D3, cash=999)
 
-    assert _flashes(client) == ["I don't see a draft yet - let's start with the opening entry."]
+    assert resp.status_code == 409
+    assert resp.get_json() == {"error": "I don't see a draft yet - let's start with the opening entry.", "to": "opening"}
     row = _row(app, report)
     assert row["cash_sales"] == 40 and row["closing_balance"] == 160

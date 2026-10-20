@@ -386,10 +386,11 @@ class TestGetPendingInvitations:
 
 class TestAcceptInvitationRoute:
     """The accept LINK itself is covered by TestAcceptInvitationPageEmailBinding (it hands
-    off to the onboarding /auth page); what is left here is the not-connected page and a
+    off to the onboarding /auth page); what is left here is the not-connected address and a
     bad token."""
 
-    def test_xero_not_connected_page_renders(self, app, db_session, models):
+    def test_xero_not_connected_address_opens_the_integration_settings(self, app, db_session, models):
+        # Its page went with Flask's HTML (2026-10-20); the address stays for old links.
         with app.test_client() as c:
             entity = _make_entity(db_session, models["Entity"], name="PageRenderCorp")
             eid = _id(entity)
@@ -397,9 +398,8 @@ class TestAcceptInvitationRoute:
             _login(c, user)
 
             resp = c.get(f"{F.co(c, eid)}/xero-not-connected")
-            assert resp.status_code == 200
-            assert b"Xero Access Required" in resp.data
-            assert b"PageRenderCorp" in resp.data
+            assert resp.status_code == 302
+            assert resp.headers["Location"].endswith(f"{F.co(c, eid)}/settings/integration")
 
     def test_invalid_token_redirects(self, app, db_session, models):
         with app.test_client() as c:

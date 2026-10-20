@@ -1,12 +1,12 @@
 """Reading a receipt with the model, through each door that asks for it:
 
-* ``POST /report/expense/extract`` - the Jinja Expenses page (``report/routes/expense_ai.py``);
 * ``POST /api/petty-cash/v1/companies/<id>/reports/expenses/extract`` - the Petty Cash API
   (``petty_cash_api/routes/expenses.py::extract_answer``);
 * ``POST /api/internal/petty-cash/expense-extract`` - the same answer for minty-petty-cash-api,
   which holds no model code and forwards the receipt here under a service assertion.
 
-All three end in ``report/services/expense_ai.py`` (the only module that talks to the model,
+(The Jinja Expenses page's ``POST /report/expense/extract`` went with Flask's HTML, 2026-10-20.)
+Both end in ``report/services/expense_ai.py`` (the only module that talks to the model,
 pinned by tests/test_expense_ai.py). The model is never called: ``expense_ai._get_client`` is a
 stand-in throughout.
 """
@@ -119,51 +119,6 @@ def shop(app, db):
         db.session.add(UserEntity(user_id=base.id, entity_id=entity.id, role="entity_base", approved=True))
         db.session.commit()
     return owner, entity, base
-
-
-# --- the Jinja page's route (pinned 2026-10-19, before the API shared its tail) ---------------------
-
-
-def _page(client, who, entity, data=JPEG, name="slip.jpg"):
-    F.login(client, who)
-    form = {"entity_id": entity.id}
-    if data is not None:
-        form["file"] = (BytesIO(data), name)
-    return client.post("/report/expense/extract", data=form, content_type="multipart/form-data")
-
-
-def test_page_switched_off_suggests_nothing_and_asks_nothing(app, client, db, shop, model, monkeypatch):
-    owner, entity, _ = shop
-    monkeypatch.setenv("EXPENSE_AI_ENABLED", "0")
-
-    resp = _page(client, owner, entity)
-
-    assert resp.status_code == 200 and resp.get_json() == {"suggestions": None, "reason": "disabled"}
-    assert model.calls == []
-
-
-def test_page_reads_a_receipt_into_checked_suggestions(app, client, db, shop, model):
-    owner, entity, _ = shop
-
-    resp = _page(client, owner, entity)
-
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["reason"] is None
-    assert body["suggestions"]["supplier"]["contact_id"] == "con-0001"
-    assert body["suggestions"]["account"]["account_id"] == "acc-0001"
-    assert body["suggestions"]["amount"]["value"] == "120.00"
-    assert len(model.calls) == 1
-
-
-def test_page_refusals_are_silent(app, client, db, shop, model):
-    owner, entity, base = shop
-
-    assert _page(client, owner, entity, data=b"GIF89a-nope").get_json() == {
-        "suggestions": None, "reason": "unsupported_file"}
-    assert _page(client, owner, entity, data=None).get_json()["reason"] == "unsupported_file"
-    assert _page(client, base, entity).get_json() == {"suggestions": None, "reason": "no_context"}
-    assert model.calls == []
 
 
 # --- the Petty Cash API: POST /reports/expenses/extract ----------------------------------------------

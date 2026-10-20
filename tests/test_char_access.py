@@ -3,7 +3,7 @@
 The redesign renames ``roles``/``permissions``/``role_permissions`` to the singular,
 ``invitations`` to ``invitation``, narrows ``invitation_status`` and turns ``user.system_role``
 into the ``system_role`` enum (D6 restores the column). What is pinned is the behaviour those
-tables back: the superuser gate, the role hierarchy when assigning roles, the invitation
+tables back: the system role, the role hierarchy when assigning roles, the invitation
 lifecycle and the terms gate. See docs/modernisation/modernisation_plan.md, Part 1 B3 group 6.
 
 F3 (closed in C1): the code wrote ``superuser`` where the schema's ``system_role`` enum says
@@ -81,24 +81,7 @@ def profile(client):
     return resp.get_json()
 
 
-# ---- the superuser gate --------------------------------------------------------------------
-
-
-def test_superuser_reaches_the_admin_pages(company, client):
-    owner, entity, superuser = company
-    F.login(client, superuser)
-    assert client.get("/admin").status_code == 200
-    assert client.get("/admin_dashboard").status_code == 200
-
-
-def test_normal_user_is_bounced_from_the_admin_pages(company, client):
-    owner, entity, superuser = company
-    F.login(client, owner)
-    for url in ("/admin", "/admin_dashboard"):
-        resp = client.get(url)
-        assert resp.status_code in (302, 403), (url, resp.status_code)
-        if resp.status_code == 302:
-            assert "/admin" not in resp.headers["Location"]
+# ---- the system role (the superuser admin pages went with Flask's HTML frontend, 2026-10-20) ---
 
 
 def test_profile_reports_the_system_role_and_memberships(company, client):
@@ -116,36 +99,6 @@ def test_profile_reports_the_system_role_and_memberships(company, client):
     F.login(client, superuser)
     # the database's word (system_role enum); "superuser" was the code's until C1
     assert profile(client)["user"]["system_role"] == "superadmin"
-
-
-def test_superuser_can_approve_and_reject_pending_users(company, client, app, db):
-    owner, entity, superuser = company
-    with app.app_context():
-        from models.db import User
-
-        pending = F.make_user(db, "pending@test.com")
-        User.query.filter_by(id=pending.id).update({"approved": False})
-        db.session.commit()
-    F.login(client, superuser)
-
-    resp = client.post(f"/approve_user/{pending.id}")
-    assert resp.status_code in (200, 302), resp.data[:300]
-
-    F.login(client, pending)
-    assert profile(client)["user"]["approved"] is True
-
-    F.login(client, superuser)
-    resp = client.post(f"/reject_user/{pending.id}")
-    assert resp.status_code in (200, 302), resp.data[:300]
-
-
-def test_normal_user_cannot_approve_users(company, client, app, db):
-    owner, entity, superuser = company
-    with app.app_context():
-        pending = F.make_user(db, "pending@test.com")
-    F.login(client, owner)
-    resp = client.post(f"/approve_user/{pending.id}")
-    assert resp.status_code in (302, 403)
 
 
 # ---- entity roles: the six-level hierarchy ---------------------------------------------------
@@ -465,7 +418,7 @@ def test_unconsented_user_is_sent_to_the_terms_page(company, client):
     # Flask has no acceptance screen since 2026-10-12 - the panel is minty-web's, over the
     # list it was just sent to. What is still reachable here is "which version is live".
     assert client.get("/legal/current").status_code == 200
-    api = client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date=2026-09-01")
+    api = client.get(f"/api/entities/{entity.id}/payment-methods")
     assert api.status_code == 403 and api.get_json()["code"] == "terms_acceptance_required"
 
 
@@ -493,7 +446,10 @@ def test_accepting_the_terms_opens_the_app(company, client, app):
         db.session.commit()
 
     assert outcome == "recorded"
-    assert client.get(f"{F.co(client, entity.id)}/petty-cash").status_code == 200
+    # the page hands over to minty-petty-cash-web now, instead of bouncing to the entity list
+    resp = client.get(f"{F.co(client, entity.id)}/petty-cash")
+    assert resp.status_code == 302 and "/handoff/petty-cash-web" in resp.headers["Location"], resp.headers.get("Location")
+    assert client.get(f"/api/entities/{entity.id}/payment-methods").status_code == 200
 
 
 def test_terms_must_be_ticked(company, client, app):
@@ -517,7 +473,8 @@ def test_terms_must_be_ticked(company, client, app):
         assert outcome == "not_ticked"
         assert has_consent(owner.id) is False
 
-    assert client.get(f"{F.co(client, entity.id)}/petty-cash").status_code == 302
+    resp = client.get(f"{F.co(client, entity.id)}/petty-cash")
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/entity")
 
 
 def test_consent_is_recorded_once_per_version(company, client, app, db):

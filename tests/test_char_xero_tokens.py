@@ -191,7 +191,7 @@ def test_the_token_check_answers_for_a_fresh_token(connected, client, app, xero)
     F.login(client, owner)
     resp = client.get("/check/token")
     assert resp.status_code == 200, resp.data[:300]
-    assert resp.get_data(as_text=True) == "Valid Token"
+    assert resp.get_json() == {"status": "Valid Token"}  # JSON: Flask answers no HTML
     assert xero.refreshes() == [], "a fresh token is checked without touching Xero"
 
 
@@ -204,7 +204,7 @@ def test_the_token_check_says_expired_when_xero_refuses_to_renew(connected, clie
     F.login(client, owner)
     resp = client.get("/check/token")
     assert resp.status_code == 200, resp.data[:300]
-    assert resp.get_data(as_text=True) == "expired_token"
+    assert resp.get_json() == {"status": "expired_token"}
 
 
 def test_the_refresh_button_renews_an_aged_token(connected, client, app, db, xero):

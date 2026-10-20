@@ -128,9 +128,10 @@ def create_app():
     root_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..", "..")
     )
+    # No template_folder: Flask draws no pages (2026-10-20). ``static/`` holds only the images
+    # the outgoing mail links to (blueprints/invitation/services/invite.py's ``_asset_url``).
     app = Flask(
         __name__,
-        template_folder=os.path.join(root_dir, "templates"),
         static_folder=os.path.join(root_dir, "static"),
     )
     # Before any blueprint adds a rule: the <entity:...> converter and its resolver
@@ -154,11 +155,9 @@ def create_app():
             "entity.entity_settings_module": ["entity_settings_module"],
             "report.entity_report_history": ["entity_report_history"],
             "entity_report_history": ["report.entity_report_history"],
-            "report.delete_report": ["delete_report"],
             "xero.xero_auth": ["xero_auth"],
             "xero.xero_connect_entity": ["xero_connect_entity"],
             "xero.xero_reconnect": ["xero_reconnect"],
-            "user_management.admin": ["approve_admins"],
         },
     )
     CORS(app)
@@ -168,7 +167,6 @@ def create_app():
 
     app.config["CLIENT_ID"] = os.environ.get("XERO_CLIENT_ID")
     app.config["CLIENT_SECRET"] = os.environ.get("XERO_CLIENT_SECRET")
-    app.config["SPIRE_KEY"] = os.environ.get("SPIRE_KEY")
     app.config["XERO_API_BASE_URL"] = XERO_API_BASE_URL
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_size": 15,
@@ -240,30 +238,27 @@ def create_app():
     # which reads flashes by category) shows it as information.
     cast(Any, login_manager).login_message_category = "info"
 
-    # Per-sign-in state: reset the "already shown" flags, and stamp a new login id.
+    # Per-sign-in state: stamp a new login id, and clear the cached Terms agreement.
     #
     # ``logout_user()`` only removes Flask-Login's own session keys — the session
-    # COOKIE survives, and with it anything else stored there. So a once-per-login
-    # flag written into the session was really once-per-browser-forever: logging out
-    # and back in did not clear it, and a DIFFERENT user signing in on the same
-    # browser inherited the previous user's flags.
+    # COOKIE survives, and with it anything else stored there. So anything once-per-login
+    # written into the session would really be once-per-browser-forever, and a DIFFERENT
+    # user signing in on the same browser would inherit the previous user's state.
     #
-    # The login id is what lets the Module 2 frontend honour the same rule. It cannot
-    # read this session, so it gets the id as a JWT claim and keys its own flag by it.
+    # The login id is what lets the front ends show their notices once per sign-in. They
+    # cannot read this session, so they get the id as a JWT claim and key their own flag by it.
     #
-    # Hooking the signal rather than the login route covers every path that
-    # authenticates someone — password, OTP, invitation accept, and the JWT
-    # re-entry from Module 2 — which is more than any one route could.
+    # Hooking the signal rather than a route covers every path that authenticates
+    # someone — the emailed code, Xero, invitation accept, and the JWT re-entry from the
+    # front ends — which is more than any one route could.
     from flask_login import user_logged_in
 
-    from blueprints.entity.services.modules import (LOGIN_SID_SESSION_KEY,
-                                                    NOTICE_SEEN_SESSION_KEY)
+    from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
 
     from blueprints.legal.services.gate import clear_session_agreement
 
     @user_logged_in.connect_via(app)
     def _reset_per_login_state(_sender, **_kwargs):
-        session.pop(NOTICE_SEEN_SESSION_KEY, None)
         session[LOGIN_SID_SESSION_KEY] = uuid.uuid4().hex
         # Terms acceptance is cached in the session for speed. It MUST be
         # cleared here for exactly the reason described above: the cookie

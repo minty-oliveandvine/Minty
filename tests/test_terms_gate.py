@@ -123,13 +123,14 @@ def test_the_health_check_is_never_gated(blocked, db_session):
 
 
 def test_static_files_are_never_gated(blocked, db_session):
-    response = blocked.get("/static/css/main.css")
-    assert response.status_code in (200, 304, 404)  # anything but a redirect
+    response = blocked.get("/static/img/minty-mark.png")
+    assert response.status_code in (200, 304)  # anything but a redirect
 
 
 def test_login_endpoints_stay_reachable(blocked, db_session):
     """Or nobody can authenticate far enough to reach the acceptance screen."""
-    assert blocked.get("/login").status_code in (200, 302)
+    assert blocked.get("/").status_code in (200, 302)
+    assert blocked.get("/auth/notices").status_code == 200
     # forwards to the hub's sign-up, ungated
     assert blocked.get("/register").status_code == 302
 
@@ -171,7 +172,7 @@ def test_an_invite_link_is_not_swallowed_by_the_gate(blocked, db_session):
 
 def test_the_xero_not_connected_page_stays_gated(blocked, db_session):
     """Deliberately NOT allow-listed alongside the accept route: this one
-    renders a template, so it is content like any other."""
+    leads into a company's settings, so it is content like any other."""
     response = blocked.get(
         "/invitation/xero-not-connected/00000000-0000-0000-0000-000000000001",
         follow_redirects=False,
@@ -251,7 +252,7 @@ def test_an_api_path_gets_403(blocked, db_session):
 def test_an_anonymous_visitor_is_not_gated(client, db_session):
     """The gate must not interfere with logging in, and must leave the
     Bearer-token integrations alone — neither populates current_user."""
-    response = client.get("/login", follow_redirects=False)
+    response = client.get("/", follow_redirects=False)
     assert response.status_code in (200, 302)
     # NOT refused by the gate. Asked as a JSON caller, because an HTML 302 to /entity is
     # ambiguous - /index redirects there by itself - while the gate's JSON refusal is not.

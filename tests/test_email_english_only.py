@@ -1,5 +1,6 @@
 """Email addresses are English only (printable ASCII) - the server half of the rule
-(``blueprints/shared/email_rules.py``; the browser half is ``static/js/email_input.js``).
+(``blueprints/shared/email_rules.py``; the browser half is each Next.js app's - Flask draws no
+page since 2026-10-20).
 
 Every path that takes a typed address refuses Korean before the "@" and an international
 domain after it, in the hint's words, and still takes an ordinary address such as
@@ -195,51 +196,3 @@ def test_an_ordinary_business_email_is_saved(app, client, world):
     assert resp.status_code == 200, resp.data[:300]
     with app.app_context():
         assert _db.session.get(Entity, entity.id).business_email == ENGLISH
-
-
-def test_the_entity_create_form_refuses_it_and_shows_why(app, client, world):
-    from models.db import Entity
-
-    F.login(client, world["owner"])
-    resp = client.post("/entity/create", data={
-        "entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD",
-        "contact_phone": "91234567", "business_email": "홍길동@example.com",
-    }, follow_redirects=False)
-
-    assert resp.status_code == 200, "the form again, not a redirect to success"
-    page = resp.get_data(as_text=True)
-    assert HINT in page
-    # the field the page renders is the English-only one (static/js/email_input.js)
-    assert 'id="businessEmail"' in page and 'data-email-ascii=' in page and 'type="email"' not in page
-    with app.app_context():
-        assert Entity.query.filter_by(name="Corner Shop").count() == 0
-
-
-def test_the_entity_create_form_refuses_a_malformed_address_instead_of_saving_null(app, client, world):
-    # type="email" used to stop this in the browser; with the field now type="text", the form's
-    # own shape check must, or entity_create would save the entity with business_email NULL.
-    from models.db import Entity
-
-    F.login(client, world["owner"])
-    resp = client.post("/entity/create", data={
-        "entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD",
-        "contact_phone": "91234567", "business_email": "not-an-address",
-    }, follow_redirects=False)
-
-    assert resp.status_code == 200, "the form again, not a redirect to success"
-    assert "Please enter a valid business email." in resp.get_data(as_text=True)
-    with app.app_context():
-        assert Entity.query.filter_by(name="Corner Shop").count() == 0
-
-
-# ---- the pages carry the English-only field ----------------------------------------------------
-
-
-def test_the_sign_in_pages_use_the_english_only_field(client):
-    # Sign-in and sign-up are minty-web's /login since phase 2 (its lib/emailInput.ts); the
-    # password page is the one Flask still draws.
-    for path in ("/login",):
-        page = client.get(path).get_data(as_text=True)
-        assert "js/email_input.js" in page, path
-        assert "data-email-ascii=" in page, path
-        assert 'type="email"' not in page, path

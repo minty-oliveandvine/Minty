@@ -83,7 +83,7 @@ def entity_row(app, entity_id):
         return F.snapshot(e, "id", "name", "status", "country_code", "currency_id", "xero_org_id")
 
 
-# ---- the entity-create form -------------------------------------------------------------------
+# ---- creating a company (Flask's form until 2026-10-20; the onboarding wizard's API now) -------
 
 
 def test_creating_a_company_makes_the_creator_its_admin_and_seeds_every_module_off(world, client, app):
@@ -91,11 +91,10 @@ def test_creating_a_company_makes_the_creator_its_admin_and_seeds_every_module_o
 
     admin = world["admin"]
     F.login(client, admin)
-    resp = client.post("/entity/create", data={
+    resp = client.post("/api/onboarding/create", json={
         "entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD",
-        "contact_phone": "91234567", "business_email": "shop@test.com",
-    }, follow_redirects=False)
-    assert resp.status_code == 302, resp.data[:300]
+    }, headers=onboarding_bearer(app, admin.id))
+    assert resp.status_code in (200, 201), resp.data[:300]
 
     from models.db import Entity, UserEntity
 
@@ -116,11 +115,9 @@ def test_creating_a_company_makes_the_creator_its_admin_and_seeds_every_module_o
 
 def test_the_module_rows_a_creation_seeds_carry_the_creator(world, client, app):
     admin = world["admin"]
-    F.login(client, admin)
-    client.post("/entity/create", data={
+    client.post("/api/onboarding/create", json={
         "entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD",
-        "contact_phone": "91234567", "business_email": "shop@test.com",
-    })
+    }, headers=onboarding_bearer(app, admin.id))
     from models.db import Entity
 
     with app.app_context():
@@ -130,12 +127,15 @@ def test_the_module_rows_a_creation_seeds_carry_the_creator(world, client, app):
 
 def test_a_second_company_with_the_same_name_is_refused(world, client, app):
     admin = world["admin"]
-    F.login(client, admin)
-    data = {"entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD",
-            "contact_phone": "91234567", "business_email": "shop@test.com"}
-    client.post("/entity/create", data=data)
-    resp = client.post("/entity/create", data=data)
-    assert resp.status_code in (200, 302), "back to the form, not created again"
+    with app.app_context():
+        from models.db import db
+
+        other = F.make_user(db, "other@test.com")
+    data = {"entity_name": "Corner Shop", "country_code": "HK", "currency_code": "HKD"}
+    client.post("/api/onboarding/create", json=data, headers=onboarding_bearer(app, admin.id))
+    # the same person picking it up again is the wizard rebinding (below); someone else is refused
+    resp = client.post("/api/onboarding/create", json=data, headers=onboarding_bearer(app, other.id))
+    assert resp.status_code == 409, resp.data[:300]
     from models.db import Entity
 
     with app.app_context():
@@ -242,29 +242,16 @@ def company(app, db, world):
     return entity
 
 
-def test_the_settings_pages_render_for_an_admin(world, company, client):
+def test_the_settings_pages_hand_over_for_an_admin(world, company, client):
     F.login(client, world["admin"])
-    for url in (f"{F.co(client, company.id)}/settings/petty-cash", f"{F.co(client, company.id)}/modules"):
-        resp = client.get(url, follow_redirects=True)
-        assert resp.status_code == 200, (url, resp.status_code, resp.data[:200])
+    # Petty Cash Settings is minty-petty-cash-web's page since Flask's HTML went (2026-10-20)
+    resp = client.get(f"{F.co(client, company.id)}/settings/petty-cash")
+    assert resp.status_code == 302 and "/handoff/petty-cash-web" in resp.headers["Location"], resp.headers.get("Location")
     # the Module, Users and Entity & Integration tabs are minty-web's pages: hand-overs, not
     # renders (test_minty_web_handoff, test_hub_company_settings)
     for tab in ("modules", "users", "integration"):
         resp = client.get(f"{F.co(client, company.id)}/settings/{tab}")
         assert resp.status_code == 302 and "/landing?next=" in resp.headers["Location"], tab
-
-
-def test_a_cashier_cannot_change_the_company_settings(world, company, client, app, db):
-    from models.db import UserEntity
-
-    with app.app_context():
-        cashier = F.make_user(db, "cashier@test.com")
-        db.session.add(UserEntity(user_id=cashier.id, entity_id=company.id, role="cashier", approved=True))
-        db.session.commit()
-    F.login(client, cashier)
-    resp = client.post(f"{F.co(client, company.id)}/settings/petty-cash", data={"country_code": "HK", "currency_code": "HKD"})
-    assert resp.status_code in (302, 403)
-    assert entity_row(app, company.id).name == "Corner Shop"
 
 
 def test_xero_disconnect_flips_the_company_to_disconnected(world, company, client, app, db, monkeypatch):

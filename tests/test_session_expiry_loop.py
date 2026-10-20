@@ -86,12 +86,18 @@ def test_a_dead_session_is_cleared_not_just_redirected(ghost):
 def test_an_invite_link_on_a_dead_session_terminates(ghost):
     """End-to-end shape of the original report: tapping the invite link on the
     phone that still holds the stale cookie. Follow the chain and assert it
-    reaches something that is not another redirect."""
+    reaches something that is not another redirect: minty-web's sign-in page (off this
+    site since Flask's went, 2026-10-20 - the test client answers it with a 404)."""
+    from urllib.parse import urlsplit
+
     response = ghost.get(
         "/invitation/accept/some-token", follow_redirects=True
     )
 
-    assert response.status_code == 200
+    assert response.status_code not in (301, 302, 303, 307, 308)
+    final = urlsplit(response.request.url)
+    assert final.path == "/login"
+    assert final.netloc != urlsplit(response.history[0].request.url).netloc
 
 
 # --------------------------------------------------------------------------

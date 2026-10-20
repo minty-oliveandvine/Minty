@@ -42,8 +42,7 @@ _HANDOFF_MAX_AGE = 5 * 60  # seconds
 
 
 def _post_login_redirect(user: User) -> str:
-    if user.system_role == User.SYSTEM_ROLE_SUPERUSER:
-        return url_for("user_management.admin")
+    """The company list, for everyone: the superadmin's Flask pages went on 2026-10-20."""
     return url_for("auth.index")
 
 

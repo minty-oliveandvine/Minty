@@ -1,8 +1,10 @@
-"""Report history's movements CSV: the Jinja export (``report.download_reports_csv``) and the
-Petty Cash API's ``GET /reports/export.csv``, both through ``report/services/report_csv.py``.
+"""Report history's movements CSV: the Petty Cash API's ``GET /reports/export.csv``, through
+``report/services/report_csv.py``.
 
-The first block pins what the Jinja route answered before the service existed (characterisation);
-the FIXED tests name what changed on purpose. The API's door is tests/test_petty_cash_api_door.py's.
+The movements were pinned off Flask's Jinja export (``report.download_reports_csv``) before the
+service existed; that route went with Flask's HTML frontend (2026-10-20), and so did its
+export of one report by id. The FIXED tests name what the service changed on purpose. The API's
+door is tests/test_petty_cash_api_door.py's.
 """
 from __future__ import annotations
 
@@ -74,10 +76,6 @@ def books(app, db, shop):  # noqa: F811
     return owner, entity, ids
 
 
-def _jinja(client, entity, **query):
-    return client.get(f"{F.co(client, entity.id)}/petty-cash/reports/download-csv", query_string=query)
-
-
 def _rows(resp):
     return list(csv.reader(io.StringIO(resp.get_data().decode("utf-8"))))
 
@@ -105,83 +103,7 @@ SUBMITTED_ROWS = [
 ]
 
 
-# --- what the Jinja export answered before the service (characterisation) ----------------------------
-
-
-def test_the_range_export_lists_each_movement_in_day_order(app, client, books):
-    owner, entity, ids = books
-    F.login(client, owner)
-
-    resp = _jinja(client, entity, **_range(1, 0))
-
-    assert resp.status_code == 200, resp.data[:300]
-    assert resp.headers["Content-Type"] == "text/csv"
-    assert resp.headers["Content-Disposition"] == f"attachment; filename=reports_{_day(1)}_to_{_day(0)}.csv"
-    rows = _rows(resp)
-    assert rows[0] == HEADER
-    # the lines of a day came in no particular order (FIXED below: as entered)
-    assert sorted(rows[1:]) == sorted(SUBMITTED_ROWS)
-
-
-def test_the_export_is_utf8_without_a_byte_order_mark(app, client, books):
-    owner, entity, _ids = books
-    F.login(client, owner)
-
-    body = _jinja(client, entity, **_range(1, 0)).get_data()
-
-    assert body.startswith(b"Date,") and "Café 茶".encode("utf-8") in body
-    assert b'"Tape, the wide roll"' in body  # a comma in a remark is quoted
-
-
-def test_one_report_exports_by_id(app, client, books):
-    owner, entity, ids = books
-    F.login(client, owner)
-
-    resp = _jinja(client, entity, report_id=ids["second"])
-
-    assert resp.status_code == 200, resp.data[:300]
-    assert resp.headers["Content-Disposition"] == f"attachment; filename=report_{ids['second']}.csv"
-    assert _rows(resp) == [HEADER] + SUBMITTED_ROWS[7:]
-
-
-@pytest.mark.parametrize("query, message", [
-    ({}, "I need both a start and an end date to do that."),
-    ({"start_date": "2026-10-01"}, "I need both a start and an end date to do that."),
-    ({"start_date": "2026-10-05", "end_date": "2026-10-02"},
-     "Your start date lands after your end date — could you flip them around?"),
-])
-def test_the_range_export_refuses_a_missing_or_backwards_range(app, client, books, query, message):
-    owner, entity, _ids = books
-    F.login(client, owner)
-
-    resp = _jinja(client, entity, **query)
-
-    assert resp.status_code == 400 and resp.get_json() == {"status": "error", "message": message}
-
-
-def test_an_empty_range_is_404(app, client, books):
-    owner, entity, _ids = books
-    F.login(client, owner)
-
-    resp = _jinja(client, entity, start_date="2020-01-01", end_date="2020-01-31")
-
-    assert resp.status_code == 404
-    assert resp.get_json() == {"status": "error", "message": "No reports found in the specified date range."}
-
-
-def test_someone_who_may_not_see_reports_is_refused(app, client, db, books):  # noqa: F811
-    from models.db import UserEntity
-
-    _owner, entity, _ids = books
-    with app.app_context():
-        base = F.make_user(db, "base@test.com", first_name="Bea")
-        db.session.add(UserEntity(user_id=base.id, entity_id=entity.id, role="entity_base", approved=True))
-        db.session.commit()
-    F.login(client, base)
-
-    resp = _jinja(client, entity, **_range())
-
-    assert resp.status_code == 403 and resp.get_json()["message"] == "You do not have access to this entity."
+# --- the movements (characterisation, pinned off the Jinja export) ---------------------------------
 
 
 def test_no_settings_leave_the_codes_blank(app, client, db, books):  # noqa: F811
@@ -191,9 +113,8 @@ def test_no_settings_leave_the_codes_blank(app, client, db, books):  # noqa: F81
     with app.app_context():
         EntityPettycashSettings.query.filter_by(entity_id=entity.id).delete()
         db.session.commit()
-    F.login(client, owner)
 
-    rows = _rows(_jinja(client, entity, **_range(1, 0)))
+    rows = _rows(_api(app, client, entity, owner, **_range(1, 0)))
 
     assert sorted(r[1] for r in rows[1:]) == sorted(["", "445", "N/A", "N/A", "", "", "", "", "N/A", ""])
 
@@ -206,70 +127,10 @@ def _bytes(rows) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def test_fixed_the_file_is_the_same_bytes_on_every_platform_with_lines_as_entered(app, client, books):
-    """pandas ended lines with os.linesep (CRLF on Windows, LF on Linux) and read a day's lines in no
-    order; now LF everywhere and each day's lines as they were entered."""
-    owner, entity, _ids = books
-    F.login(client, owner)
-
-    assert _jinja(client, entity, **_range(1, 0)).get_data() == _bytes(SUBMITTED_ROWS)
-
-
-def test_fixed_a_draft_is_not_exported(app, client, books):
-    """A draft's figures are a day still being counted: the range export took them, and one draft
-    exported by id although the 404 already said "submitted or published" only."""
-    owner, entity, ids = books
-    F.login(client, owner)
-
-    assert _rows(_jinja(client, entity, **_range(2, 0)))[1:] == SUBMITTED_ROWS
-    only_draft = _jinja(client, entity, **_range(2, 2))
-    assert only_draft.status_code == 404
-    assert only_draft.get_json()["message"] == "No reports found in the specified date range."
-    by_id = _jinja(client, entity, report_id=ids["draft"])
-    assert by_id.status_code == 404
-    assert by_id.get_json()["message"] == "I can only download submitted or published reports as CSV."
-
-
-def test_fixed_a_report_id_from_another_company_or_malformed_is_404(app, client, db, books):  # noqa: F811
-    """Another company's report came out under this company's address; a malformed id was a 500."""
-    from models.db import Report
-
-    owner, entity, _ids = books
-    with app.app_context():
-        theirs = F.make_entity(db, owner, name="Second Shop")
-        row = Report(entity_id=theirs.id, transaction_date=D3, status="submitted", created_by=owner.id,
-                     cash_sales=5)
-        db.session.add(row)
-        db.session.commit()
-        other = str(row.id)
-    F.login(client, owner)
-
-    for report_id in (other, "not-a-uuid"):
-        resp = _jinja(client, entity, report_id=report_id)
-        assert resp.status_code == 404, (report_id, resp.data[:200])
-
-
-@pytest.mark.parametrize("query, message", [
-    ({"start_date": "01/10/2026", "end_date": "2026-10-02"},
-     "That date doesn't look quite right — could you use YYYY-MM-DD?"),
-    ({"start_date": "2025-01-01", "end_date": "2026-01-02"},
-     "That range is longer than a year — could you choose 366 days or fewer?"),
-])
-def test_fixed_a_malformed_or_unbounded_range_is_refused(app, client, books, query, message):
-    """A malformed date reached Postgres (a 500); a range had no limit."""
-    owner, entity, _ids = books
-    F.login(client, owner)
-
-    resp = _jinja(client, entity, **query)
-
-    assert resp.status_code == 400 and resp.get_json() == {"status": "error", "message": message}
-
-
 def test_a_year_of_366_days_is_allowed(app, client, books):
     owner, entity, _ids = books
-    F.login(client, owner)
 
-    resp = _jinja(client, entity, start_date=F.iso(D3 - timedelta(days=365)), end_date=F.iso(D3))
+    resp = _api(app, client, entity, owner, start_date=F.iso(D3 - timedelta(days=365)), end_date=F.iso(D3))
 
     assert resp.status_code == 200, resp.data[:300]
 
@@ -285,12 +146,11 @@ def test_fixed_the_range_takes_the_company_wide_view(app, client, db, books, mon
         cashier = F.make_user(db, "cashier@test.com", first_name="Cass")
         db.session.add(UserEntity(user_id=cashier.id, entity_id=entity.id, role="cashier", approved=True))
         db.session.commit()
-    F.login(client, cashier)
-    assert _jinja(client, entity, **_range()).status_code == 200
+    assert _api(app, client, entity, cashier, **_range()).status_code == 200
 
     monkeypatch.setitem(policy.PERMISSION_RULES, policy.Permission.REPORT_VIEW_ENTITY,
                         policy.PermissionRule(policy.Role.SHOP_MANAGER))
-    assert _jinja(client, entity, **_range()).status_code == 403
+    assert _api(app, client, entity, cashier, **_range()).status_code == 403
 
 
 # --- the Petty Cash API: GET /reports/export.csv ------------------------------------------------------

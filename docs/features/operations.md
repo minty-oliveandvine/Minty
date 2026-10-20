@@ -5,13 +5,21 @@ migration story are documented separately: `docs/schema/README.md` (the redesign
 and the one-hop pipeline) and `docs/modernisation/modernisation_plan.md` (the plan and
 the cutover runbook).
 
+**Flask is backend only since 2026-10-20** (the owner's instruction): no templates, no pages;
+every screen is a Next.js app's. `static/` keeps only `img/minty-mark.png` (the invitation
+email's logo), `img/new_logo.png` and `img/email/*` (sources for
+`scripts/subscription/build_email_assets.py`). Every error answer - 404, 405, 500, a CSRF
+failure, the read-only superuser block - is JSON (`pettycash/core/hooks.py`).
+`tests/test_zz_no_html_frontend.py` fails on a templates folder, a `render_template` call or a
+GET route that answers `text/html`.
+
 ## Process model
 
 `Procfile`: `web: gunicorn app:app` on `${PORT:-8010}` with two workers, no `--preload` — `create_app` runs
 once per worker (`services/app_runtime/legacy/bootstrap.py` builds the app; `main.py` /
 `app.py` expose it). **A route module that fails to import stops the start-up** with its
 traceback (`pettycash/core/blueprint_loader.py`, `blueprints/report/routes/__init__.py`, since
-2026-10-05): until then the failure was skipped at DEBUG and the app ran with those pages
+2026-10-05): until then the failure was skipped at DEBUG and the app ran with those routes
 missing, so a deploy that lacks a package now fails its boot instead. There is no worker dyno and no cron. The
 subscription daily pass is minty-subscription-api's (its in-process timer,
 `SUBSCRIPTION_SCHEDULER_ENABLED` there); Flask's scheduler and its engine were deleted on
@@ -32,8 +40,8 @@ the old → new rename table — is [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md). 
 | Xero | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`; the redirect URI is `ACCOUNTS_API_URL` (alias `PETTY_CASH_URL`) + `/callback` |
 | storage | `S3_URL` — `https://KEY:SECRET@s3.<region>.backblazeb2.com/<bucket>` (key and secret URL-encoded), Backblaze B2 through the S3 API; one bucket shared by every environment today |
 | mail | `SMTP_URL` — `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465`, `?timeout=` seconds per SMTP step (default 10 - `services/app_runtime/mail.py`); `MAIL_FROM` (the sender) |
-| URLs | `ACCOUNTS_API_URL` (this app's public origin; `PETTY_CASH_URL` is its transitional alias, and one of them is required outside development), `PETTY_CASH_WEB_URL` (minty-petty-cash-web), `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL` (the payment app), `ONBOARDING_WEB_URL` (the wizard) |
-| other keys | `SPIRE_KEY` (DOCX export). No Stripe keys since 2026-10-06 - Stripe is minty-subscription-api's |
+| URLs | `ACCOUNTS_API_URL` (this app's public origin; `PETTY_CASH_URL` is its transitional alias, and one of them is required outside development), `PETTY_CASH_WEB_URL` (minty-petty-cash-web: where every Petty Cash address hands over; default `http://localhost:3010`), `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL` (the payment app), `ONBOARDING_WEB_URL` (the wizard) |
+| other keys | none. `SPIRE_KEY` is no longer read (the docx export went 2026-10-20); no Stripe keys since 2026-10-06 - Stripe is minty-subscription-api's |
 | switches | `EXPENSE_AI_*` |
 | sessions | `SESSION_TYPE` (`sqlalchemy`), `SESSION_SQLALCHEMY_TABLE` (`sessions`) |
 
@@ -44,18 +52,17 @@ the local one on purpose.
 
 Receipts: [receipts-and-attachments.md](receipts-and-attachments.md). Bill attachments are
 minty-payment-request-api's, in the same bucket under its own prefixes. Nothing is stored on the
-web host's disk except the temporary files of an export.
+web host's disk.
 
 ## Mail
 
-Flask-Mail over Brevo SMTP (`SMTP_URL`; unset, every send is logged and skipped). What sends mail: OTP codes, invitations, password resets. The
+Flask-Mail over Brevo SMTP (`SMTP_URL`; unset, every send is logged and skipped). What sends mail: OTP codes and invitations (inline HTML built in Python). The
 subscription emails are minty-subscription-api's since 2026-10-06. Tests never send: the suite's
 app config points mail at nothing.
 
 ## Logging
 
-`loguru` everywhere (`logger.info(...)`), shipped off the host; the `/api/client-logs`
-sink receives the browser's own log. Two rules the tests enforce: no token in a log line
+`loguru` everywhere (`logger.info(...)`), shipped off the host. Two rules the tests enforce: no token in a log line
 (`tests/test_zz_no_token_logging.py`) and no error message that leaks internals to the
 user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
 
@@ -78,7 +85,7 @@ Handler"). It is noise, not a test failure, and does not happen on the Linux hos
   from their own conftest, without Minty on `sys.path`, so it imports nothing from the app:
   `services/app_runtime/env.py` (stdlib-only) is loaded by file path too. The `test_zz_*` files are the guards that run last: the schema audit
   against the harness build, the schema-name literal guard, route coverage, the
-  token-logging guard. **Route coverage** counts a route only when a request ran its view
+  token-logging guard, the no-HTML-frontend guard. **Route coverage** counts a route only when a request ran its view
   (never OPTIONS, never a refusal) and fails on an in-scope route that is neither reached nor
   listed in `tests/_baseline/route_coverage_misses.txt` (the known gaps), on a listed route
   that a test now reaches, and on a route `route_inventory.json` doesn't know. It judges a
@@ -86,14 +93,12 @@ Handler"). It is noise, not a test failure, and does not happen on the Linux hos
   only with `MINTY_ROUTE_BASELINE=update` (drop covered) or `=add` (also add misses). `tests/_baseline/README.md` holds the pre-C10 history.
   `test_zz_no_stripe.py` fails if application code imports `stripe`, `apscheduler` or any
   `blueprints.subscription.services` module but the read-only `store_ro`.
-- **Playwright** (`e2e/`, `npm run test:e2e`): a real browser against a Flask that is
-  already running — `e2e/README.md` has the environment (`E2E_BASE_URL`, the seeded
-  identity from `scripts/e2e_seed.py --print`, `E2E_XERO=1` for a shop linked to a Demo
-  Company). Against a deployment, run the seed
-  with that deployment's `DATABASE_URL` so it reaches its database.
-- The three Django APIs and the three Next apps have their own suites; the three e2e
-  suites together are the smoke test of a cutover (`modernisation_plan.md`, Phase E
-  step 7).
+- **Browser tests**: Flask draws no page, so it has no browser journeys of its own since
+  2026-10-20 ([ci.md](ci.md)). `scripts/e2e_seed.py --print` still seeds the identity and shop
+  the Next apps' suites sign in as; against a deployment, run it with that deployment's
+  `DATABASE_URL` so it reaches its database.
+- The Django APIs and the Next apps have their own suites; the Next apps' e2e suites together
+  are the smoke test of a cutover (`modernisation_plan.md`, Phase E step 7).
 
 ## Scripts
 

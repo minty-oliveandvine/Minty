@@ -1,9 +1,10 @@
-"""What the report wizard's last step does when the day is submitted - ``report/services/ending.py``'s
-POST, which the Part 15 Close page (``templates/report/close.html``) posts to - pinned before the
-submit moves into a service the Jinja page and the Petty Cash API share (minty-petty-cash-web's
-port, 2026-10-15).
+"""What the report wizard's last step does when the day is submitted - ``report/services/submit.py``,
+pinned before the submit moved into that service (minty-petty-cash-web's port, 2026-10-15). Driven
+through the Jinja Close page's POST until Flask's HTML frontend was deleted (2026-10-20); now
+through the Petty Cash API's ``POST /reports/submit``, which answers a refusal ``{error, to}`` (the
+step that fixes it) where the page redirected with a flash.
 
-Characterisation, green before and after the extraction (``services/submit.py``). Tests marked
+Characterisation, green before and after the extraction. Tests marked
 FIXED or RULE pin what the extraction changed deliberately: a failure during submit used to delete
 a day with no expense lines (FIXED: nothing is ever deleted); a difference saved before a later
 Deposit / Sales / Expenses change was submitted stale (RULE, the owner 2026-10-15: refused, back to
@@ -98,27 +99,28 @@ def _stock(app, entity):
 
 
 def _submit(client, who, entity, day=D3):
-    F.login(client, who)
-    return client.post("/report/ending", data={"entity_id": entity.id, "transaction_date": F.iso(day),
-                                               "action_type": "submit"})
+    """Submit the day as ``who`` through the Petty Cash API (``POST /reports/submit``)."""
+    return client.post(f"/api/petty-cash/v1/companies/{entity.id}/reports/submit",
+                       json={"transaction_date": F.iso(day)},
+                       headers=F.petty_cash_headers(client.application, who.id))
 
 
-def _flashes(client):
-    with client.session_transaction() as sess:
-        return [m for _cat, m in sess.get("_flashes", [])]
+def _refused(resp, error, to):
+    assert resp.status_code == 409, resp.get_json()
+    assert resp.get_json() == {"error": error, "to": to}
 
 
 # --- submitting --------------------------------------------------------------------------------------
 
 
-def test_submitting_posts_the_day_and_lands_on_its_outcome_page(app, client, db, shop):
+def test_submitting_posts_the_day_and_says_its_outcome_is_next(app, client, db, shop):
     owner, entity = shop
     report = _ready(app, db, entity, owner)
 
     resp = _submit(client, owner, entity)
 
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/{report}/submitted")
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["report_id"] == report and resp.get_json()["next"] == "submitted"
     row = _row(app, report)
     assert row["status"] == "submitted" and row["submitted_at"] is not None
     assert row["closing"] == 55
@@ -152,18 +154,14 @@ def test_the_submitter_becomes_the_reports_creator(app, client, db, shop):
     assert _row(app, report)["created_by"] == clerk.id
 
 
-# --- refusals ----------------------------------------------------------------------------------------
+# --- refusals (a second submit: tests/test_petty_cash_api_close.py) -----------------------------------
 
 
 def test_a_step_not_done_is_refused_and_sent_to_that_step(app, client, db, shop):
     owner, entity = shop
     report = _ready(app, db, entity, owner, completed_sections=["opening", "sales", "expenses", "cash_count"])
 
-    resp = _submit(client, owner, entity)
-
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/cash-count?transaction_date={F.iso(D3)}")
-    assert _flashes(client) == ["Finish Cash Count before you submit the day."]
+    _refused(_submit(client, owner, entity), "Finish Cash Count before you submit the day.", "cash_count")
     assert _row(app, report)["status"] == "draft"
 
 
@@ -171,22 +169,9 @@ def test_a_negative_expected_cash_is_refused(app, client, db, shop):
     owner, entity = shop
     report = _ready(app, db, entity, owner, bank_deposit=500)
 
-    resp = _submit(client, owner, entity)
-
-    assert resp.status_code == 302
-    assert _flashes(client) == ["Hmm, it looks like your cash balance is negative. Could you fix that first?"]
+    _refused(_submit(client, owner, entity),
+             "Hmm, it looks like your cash balance is negative. Could you fix that first?", "cash_count")
     assert _row(app, report)["status"] == "draft"
-
-
-def test_a_second_submit_finds_no_draft(app, client, db, shop):
-    owner, entity = shop
-    report = _ready(app, db, entity, owner)
-    _submit(client, owner, entity)
-
-    resp = _submit(client, owner, entity)
-
-    assert resp.status_code == 302 and "/reports/new/opening" in resp.headers["Location"]
-    assert _row(app, report)["status"] == "submitted"
 
 
 def test_fixed_a_failure_during_submit_leaves_the_draft_as_it_was(app, client, db, shop, monkeypatch):
@@ -198,18 +183,13 @@ def test_fixed_a_failure_during_submit_leaves_the_draft_as_it_was(app, client, d
     def fail(*_args, **_kwargs):
         raise RuntimeError("the closing could not be worked out")
 
-    # Patched where nothing binds it at import (ending.py imports refresh_cash_stock by name, so
-    # patching that would leak into later tests - the conftest re-import trap).
+    # Patched where nothing binds it at import (the conftest re-import trap).
     monkeypatch.setattr("blueprints.report.services.submit.closing_at_submit", fail)
     resp = _submit(client, owner, entity)
 
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/ending?transaction_date={F.iso(D3)}")
-    assert _flashes(client) == [
-        "Something went wrong on my end while submitting your report. Nothing was submitted - mind trying again?"]
+    assert resp.status_code == 500
     row = _row(app, report)
-    # as it was: the page itself marks "ending" reached when it is opened, before the submit
-    assert row["status"] == "draft" and row["closing"] == 55 and row["completed"] == ALL + ["ending"]
+    assert row["status"] == "draft" and row["closing"] == 55 and row["completed"] == ALL
 
 
 def test_fixed_an_expense_line_without_an_item_is_refused_and_sent_to_expenses(app, client, db, shop):
@@ -217,10 +197,8 @@ def test_fixed_an_expense_line_without_an_item_is_refused_and_sent_to_expenses(a
     owner, entity = shop
     report = _ready(app, db, entity, owner, item="")
 
-    resp = _submit(client, owner, entity)
-
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/expense?transaction_date={F.iso(D3)}")
-    assert _flashes(client) == ["An expense has no account or no amount. Fix it in Expenses, then submit."]
+    _refused(_submit(client, owner, entity),
+             "An expense has no account or no amount. Fix it in Expenses, then submit.", "expenses")
     assert _row(app, report)["status"] == "draft"
 
 
@@ -230,10 +208,8 @@ def test_rule_a_difference_saved_before_a_later_deposit_change_is_refused(app, c
     owner, entity = shop
     report = _ready(app, db, entity, owner, bank_deposit=90)  # expected is 65 now; 55 was counted
 
-    resp = _submit(client, owner, entity)
-
-    assert resp.headers["Location"].endswith(f"/petty-cash/reports/new/cash-count?transaction_date={F.iso(D3)}")
-    assert _flashes(client) == ["The figures changed after the cash count. Check the cash count again, then submit."]
+    _refused(_submit(client, owner, entity),
+             "The figures changed after the cash count. Check the cash count again, then submit.", "cash_count")
     assert _row(app, report)["status"] == "draft"
 
 
@@ -242,10 +218,8 @@ def test_rule_a_difference_without_its_reason_is_refused(app, client, db, shop):
     owner, entity = shop
     report = _ready(app, db, entity, owner, counts={50: 1}, discrepancy_amount=-5, discrepancy_type="short")
 
-    resp = _submit(client, owner, entity)
-
-    assert "/reports/new/cash-count" in resp.headers["Location"]
-    assert _flashes(client) == ["The count has a difference with no reason. Add the reason in Cash Count."]
+    _refused(_submit(client, owner, entity),
+             "The count has a difference with no reason. Add the reason in Cash Count.", "cash_count")
     assert _row(app, report)["status"] == "draft"
 
 

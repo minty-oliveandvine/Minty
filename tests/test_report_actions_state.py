@@ -1,11 +1,13 @@
-"""What happens to a submitted report afterwards - reopening it as a draft
-(``POST /report/<id>/convert-to-draft``, ``services/ending.py::revert_report_to_draft``) and
-deleting it (``POST /report/delete/<id>``, ``routes/report_detail.py::delete_report``) - pinned
-before both move into a service the Jinja pages and the Petty Cash API share (minty-petty-cash-web's
-port, 2026-10-15).
+"""What happens to a submitted report afterwards - reopening it as a draft and deleting it
+(``report/services/report_actions.py``) - pinned before both moved into that service
+(minty-petty-cash-web's port, 2026-10-15). Driven through the Jinja routes
+(``/report/<id>/convert-to-draft``, ``/report/delete/<id>``) until Flask's HTML frontend was deleted
+(2026-10-20); now through the Petty Cash API's ``POST /reports/<id>/reopen`` and
+``DELETE /reports/<id>``, which answer a refusal ``{error}`` where the pages flashed. (The API's own
+answers: tests/test_petty_cash_api_report.py.)
 
-Characterisation, green before and after the extraction (services/report_actions.py). Tests marked
-FIXED or RULE pin what it changed deliberately.
+Characterisation, green before and after the extraction. Tests marked FIXED or RULE pin what it
+changed deliberately.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ pytestmark = pytest.mark.char
 def _submitted(app, client, db, entity, owner, **fields):  # noqa: F811
     report = _ready(app, db, entity, owner, **fields)
     resp = _submit(client, owner, entity)
-    assert resp.status_code == 302 and "/submitted" in resp.headers["Location"], resp.headers.get("Location")
+    assert resp.status_code == 200, resp.get_json()
     return report
 
 
@@ -45,19 +47,16 @@ def _xero(app, report_id):
                 "sync_rows": XeroReportSync.query.filter_by(report_id=report_id).count()}
 
 
-def _reopen(client, who, report_id):
-    F.login(client, who)
-    return client.post(f"/report/{report_id}/convert-to-draft")
+def _url(entity, report_id, tail=""):
+    return f"/api/petty-cash/v1/companies/{entity.id}/reports/{report_id}{tail}"
 
 
-def _delete(client, who, report_id):
-    F.login(client, who)
-    return client.post(f"/report/delete/{report_id}")
+def _reopen(client, who, entity, report_id):
+    return client.post(_url(entity, report_id, "/reopen"), headers=F.petty_cash_headers(client.application, who.id))
 
 
-def _flashes(client):
-    with client.session_transaction() as sess:
-        return [m for _cat, m in sess.get("_flashes", [])]
+def _delete(client, who, entity, report_id):
+    return client.delete(_url(entity, report_id), headers=F.petty_cash_headers(client.application, who.id))
 
 
 def _older(app, db, entity, owner, days_back=1, **fields):  # noqa: F811
@@ -82,11 +81,9 @@ def test_reopening_the_latest_report_makes_it_a_draft_from_opening(app, client, 
     report = _submitted(app, client, db, entity, owner)
     assert _stock(app, entity) == {50: 50, 5: 5}
 
-    resp = _reopen(client, owner, report)
+    resp = _reopen(client, owner, entity, report)
 
-    assert resp.status_code == 200
-    assert resp.get_json() == {"status": "success", "message": "Report converted to draft", "draft_id": report,
-                               "transaction_date": F.iso(D3)}
+    assert resp.status_code == 200, resp.get_json()
     row = _row(app, report)
     assert row["status"] == "draft" and row["section"] == "opening" and row["completed"] == []
     assert row["closing"] == 55  # the figures stay
@@ -98,11 +95,11 @@ def test_only_the_latest_report_can_be_reopened(app, client, db, shop):  # noqa:
     older = _older(app, db, entity, owner)
     _submitted(app, client, db, entity, owner)
 
-    resp = _reopen(client, owner, older)
+    resp = _reopen(client, owner, entity, older)
 
     assert resp.status_code == 400
-    assert resp.get_json()["message"] == ("You can only edit the most recent report. Delete or edit the newer "
-                                          "reports first.")
+    assert resp.get_json() == {"error": "You can only edit the most recent report. Delete or edit the newer "
+                                        "reports first."}
     assert _row(app, older)["status"] == "submitted"
 
 
@@ -111,7 +108,7 @@ def test_a_report_in_xero_reopens_and_keeps_its_xero_markers(app, client, db, sh
     report = _submitted(app, client, db, entity, owner)
     _set(app, report, xero_integrated=True, publishing_status="completed", status="published")
 
-    resp = _reopen(client, owner, report)
+    resp = _reopen(client, owner, entity, report)
 
     assert resp.status_code == 200
     assert _xero(app, report)["xero_integrated"] is True
@@ -119,12 +116,12 @@ def test_a_report_in_xero_reopens_and_keeps_its_xero_markers(app, client, db, sh
 
 
 def test_an_unknown_report_is_404(app, client, db, shop):  # noqa: F811
-    owner, _entity = shop
+    owner, entity = shop
     import uuid
 
-    resp = _reopen(client, owner, str(uuid.uuid4()))
+    resp = _reopen(client, owner, entity, str(uuid.uuid4()))
 
-    assert resp.status_code == 404 and resp.get_json()["message"] == "Report not found"
+    assert resp.status_code == 404 and resp.get_json() == {"error": "Hmm, I couldn't find that report."}
 
 
 def test_fixed_a_draft_cannot_be_reopened(app, client, db, shop):  # noqa: F811
@@ -132,10 +129,10 @@ def test_fixed_a_draft_cannot_be_reopened(app, client, db, shop):  # noqa: F811
     owner, entity = shop
     draft = _ready(app, db, entity, owner)  # every step done, not submitted
 
-    resp = _reopen(client, owner, draft)
+    resp = _reopen(client, owner, entity, draft)
 
     assert resp.status_code == 409
-    assert resp.get_json()["message"] == "This report is already a draft. Carry on with the Daily Closing."
+    assert resp.get_json() == {"error": "This report is already a draft. Carry on with the Daily Closing."}
     assert _row(app, draft)["completed"] == ["opening", "sales", "expenses", "deposit", "cash_count"]
 
 
@@ -145,10 +142,10 @@ def test_fixed_a_report_xero_is_publishing_cannot_be_reopened(app, client, db, s
     report = _submitted(app, client, db, entity, owner)
     _set(app, report, publishing_status="publishing")
 
-    resp = _reopen(client, owner, report)
+    resp = _reopen(client, owner, entity, report)
 
     assert resp.status_code == 409
-    assert resp.get_json()["message"] == "Xero is still publishing this report. Wait until it finishes, then edit it."
+    assert resp.get_json() == {"error": "Xero is still publishing this report. Wait until it finishes, then edit it."}
     assert _row(app, report)["status"] == "submitted"
 
 
@@ -157,7 +154,7 @@ def test_fixed_resubmitting_a_report_reopened_from_xero_is_no_longer_published(a
     owner, entity = shop
     report = _submitted(app, client, db, entity, owner)
     _set(app, report, xero_integrated=True, publishing_status="completed", status="published")
-    _reopen(client, owner, report)
+    _reopen(client, owner, entity, report)
     from models.db import Report, db as _db
 
     with app.app_context():
@@ -178,10 +175,9 @@ def test_deleting_the_latest_report_removes_it_and_refreshes_the_stock(app, clie
     owner, entity = shop
     report = _submitted(app, client, db, entity, owner)
 
-    resp = _delete(client, owner, report)
+    resp = _delete(client, owner, entity, report)
 
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/petty-cash")
-    assert _flashes(client) == ["That report's deleted."]
+    assert resp.status_code == 200, resp.get_json()
     assert _row(app, report) is None
     assert _stock(app, entity) == {}
 
@@ -191,10 +187,10 @@ def test_only_the_latest_report_can_be_deleted(app, client, db, shop):  # noqa: 
     older = _older(app, db, entity, owner)
     _submitted(app, client, db, entity, owner)
 
-    resp = _delete(client, owner, older)
+    resp = _delete(client, owner, entity, older)
 
-    assert resp.status_code == 302
-    assert _flashes(client) == ["I can only delete the most recent report, and there's a newer one after this."]
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "I can only delete the most recent report, and there's a newer one after this."}
     assert _row(app, older) is not None
 
 
@@ -205,7 +201,7 @@ def test_a_report_in_xero_is_deleted_with_its_publish_record(app, client, db, sh
     report = _submitted(app, client, db, entity, owner)
     _set(app, report, xero_integrated=True, publishing_status="completed", status="published")
 
-    _delete(client, owner, report)
+    _delete(client, owner, entity, report)
 
     assert _row(app, report) is None
 
@@ -216,42 +212,23 @@ def test_rule_a_report_xero_is_publishing_cannot_be_deleted(app, client, db, sho
     report = _submitted(app, client, db, entity, owner)
     _set(app, report, publishing_status="publishing")
 
-    resp = _delete(client, owner, report)
+    resp = _delete(client, owner, entity, report)
 
-    assert resp.status_code == 302
-    assert _flashes(client) == ["Xero is still publishing this report. Wait until it finishes before deleting it."]
+    assert resp.status_code == 409
+    assert resp.get_json() == {"error": "Xero is still publishing this report. Wait until it finishes before deleting it."}
     assert _row(app, report) is not None
 
 
 def test_fixed_deleting_an_unknown_report_says_so(app, client, db, shop):  # noqa: F811
-    """FIXED: the 404 was caught by the generic handler, which used the report id as the company id."""
+    """FIXED: the Jinja route's 404 was caught by the generic handler, which used the report id as the
+    company id."""
     import uuid
 
-    owner, _entity = shop
-
-    resp = _delete(client, owner, str(uuid.uuid4()))
-
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/entity")
-    assert _flashes(client) == ["Hmm, I couldn't find that report."]
-
-
-def test_fixed_the_pages_fetch_gets_json_and_a_refusal_is_not_taken_for_success(app, client, db, shop):  # noqa: F811
-    """FIXED: the Daily Report and history pages delete with fetch; every refusal was a redirect,
-    which fetch followed to a 200 page - and the page said "The report is deleted."."""
     owner, entity = shop
-    older = _older(app, db, entity, owner)
-    latest = _submitted(app, client, db, entity, owner)
-    F.login(client, owner)
-    json = {"Accept": "application/json"}
 
-    refused = client.post(f"/report/delete/{older}", headers=json)
-    assert refused.status_code == 400
-    assert refused.get_json() == {"status": "error",
-                                  "message": "I can only delete the most recent report, and there's a newer one after this."}
+    resp = _delete(client, owner, entity, str(uuid.uuid4()))
 
-    done = client.post(f"/report/delete/{latest}", headers=json)
-    assert done.status_code == 200 and done.get_json() == {"status": "success", "message": "That report's deleted."}
-    assert _row(app, latest) is None
+    assert resp.status_code == 404 and resp.get_json() == {"error": "Hmm, I couldn't find that report."}
 
 
 def test_deleting_keeps_the_receipts_until_the_rows_are_gone(app, client, db, shop, monkeypatch):  # noqa: F811
@@ -272,7 +249,7 @@ def test_deleting_keeps_the_receipts_until_the_rows_are_gone(app, client, db, sh
 
     # patched where nothing binds it at import (the conftest re-import trap)
     monkeypatch.setattr("blueprints.report.services.cash_denominations.refresh_cash_stock", fail)
-    _delete(client, owner, report)
+    _delete(client, owner, entity, report)
 
     assert _row(app, report) is not None
     assert "expenses/x/RECEIPT_15.jpg" in s3.objects

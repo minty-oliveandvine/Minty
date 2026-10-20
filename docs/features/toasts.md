@@ -6,8 +6,13 @@ label, the message in grey and a `×`, stacked at the top-right. **No per-type c
 icon**: the label (Success / Error / Warning / Information) carries the type. This replaced
 the old coloured pill (5px border, rounded-full, a PNG icon per tone) in every app.
 
-The reference is minty-web's `components/ui/Toast.tsx`. Change all three together (minty-web,
-minty-onboarding-web, here).
+The reference is minty-web's `components/ui/Toast.tsx`. Change the apps below together.
+
+**Minty (Flask) has no toast since 2026-10-20**: it draws no page. A `flash()` is carried by
+`/entity` to minty-web's company list as a signed notice, which minty-web shows as this toast;
+a redirect into any other app drops the queue and logs it
+(`pettycash/core/hooks.py::drop_flashes_leaving_flask`; [entities-and-members.md](entities-and-members.md)).
+This page stays here because the other repos link it as the system-wide rule.
 
 **minty-payment-request-web left this rule on 2026-10-13** (the owner: Part 14 wins there): its
 toast is Part 14's - bottom-left on a computer, bottom-centre on a phone, for success only; an
@@ -25,8 +30,7 @@ Part 14's until minty-web migrates to Parts 13–15 (`docs/design/`).
 | `×` | `#6b7280`, `#171717` on hover, `aria-label="Dismiss"` |
 | Roles | `role="alert"` for an error, `role="status"` otherwise; `data-toast-type` names the type |
 
-minty-web also has a dark theme through its CSS variables; the other three apps are light
-only.
+minty-web also has a dark theme through its CSS variables; the other apps are light only.
 
 ## Each app
 
@@ -35,41 +39,3 @@ only.
 | minty-web | `components/ui/Toast.tsx` | `useToast().showToast(message, type = "info")` | stacks; 4s |
 | minty-payment-request-web | `components/Toast.tsx` | `useToast().showToast(message, type = "success")`, `dismissToast(id)` | stacks; 4s |
 | onboarding | `components/Toast.tsx` | `useToast().success/error/warning/info(message?)`, `show`, `hide` | one at a time (a new one replaces it); 4s; each type has a fallback sentence |
-| Minty (here) | `templates/components/flash_messages.html` | `showFlashMessages(message, type, durationMs)` + aliases | stacks; 4s, 12s for a flashed error/warning |
-
-## Here: one toast, no page copies
-
-`components/flash_messages.html` is the only toast. `base/layout.html` and every standalone
-template include it; it drains `get_flashed_messages()` on load (see
-`tests/test_flash_messages_drain.py`) and builds each card with `textContent` — never
-`innerHTML`, so server text cannot become markup.
-
-A `flash()` only reaches a Flask page. A redirect into another app (onboarding, minty-web, the
-payments app) drops the queue and logs it (`pettycash/core/hooks.py::drop_flashes_leaving_flask`).
-Without that, the queue waits for the next Flask page and pops up out of context.
-`/entity`'s minty-web hand-over is the one exception: it drains and signs the queue itself first
-([entities-and-members.md](entities-and-members.md)).
-
-- `showFlashMessages(message, type, durationMs)` — `type` is `success | error | danger |
-  warning | info` (`danger` is error; anything else is success). `durationMs` defaults to
-  4000; `0` keeps it until dismissed. Each card has its own timer, so toasts never cut each
-  other short.
-- Error and warning text goes through `mintyErrorCopy` (see
-  [ERROR_MESSAGE_LEAKS.md](ERROR_MESSAGE_LEAKS.md)); success and info pass through.
-- The aliases callers use — `showToast(m, t = 'error')`, `showSuccessToast`,
-  `showErrorToast`, `showWarningToast`, `showInfoToast`, the `showFlash*Toast` four,
-  `showSettingsFlashToast`, `hideFlashMessages` and its old `hide*` names — are set
-  unconditionally. **No page defines its own toast function or toast markup**; a top-level
-  `function showErrorToast` in a page would silently replace the shared one.
-- A server-rendered toast (register's form errors, `errors.html`) uses the
-  `components.toast(message=..., toastBorder='errorBorder')` macro, which only emits a
-  `showFlashMessages` call.
-- The cards are `.minty-toast`, styled by the partial's own `<style>` block, not Tailwind
-  classes. They are deliberately not `.toast`: a page's old "hide every `.toast` after 4s"
-  sweep cut the Xero sign-in toast to 3.5s and blanked later ones. Those sweeps are gone; do
-  not add one.
-
-Until 2026-10-01 there were ten page copies (the dashboard, report history / submitted /
-ending, cash count, deposit, opening, expense, the unsaved-changes toast on six report steps,
-entity settings, users settings, and the bottom-centre macro). All of them now call the shared
-toast; the unsaved-changes notice is a warning toast.

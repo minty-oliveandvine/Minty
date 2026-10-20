@@ -288,17 +288,3 @@ def test_a_company_the_person_is_not_in_opens_no_profile(app, client, people, hu
         # the session serialises each flash as a [category, message] list
         flashes = [tuple(f) for f in session["_flashes"]]
     assert ("danger", "Hmm, it looks like you don't have permission to look there.") in flashes
-
-
-def test_the_avatar_links_go_through_it_and_carry_no_token(app, people):
-    from flask import render_template_string
-
-    shop = people["shop"]
-    cases = {
-        "{{ bills_app_profile_unscoped_url() }}": "/profile",
-        "{{ bills_app_profile_url(eid) }}": f"/profile?entity_id={shop.id}",
-        "{{ bills_app_profile_url('') }}": "/entity",
-    }
-    with app.test_request_context():
-        for template, expected in cases.items():
-            assert render_template_string(template, eid=shop.id) == expected, template

@@ -3,13 +3,11 @@
 Pins: the name as an address segment; the short id deciding the company and the name only for
 reading (a rename never breaks a link - the old name redirects); an unknown company answered by
 the usual guards, not a 404 that would tell a stranger which short ids exist; every old address
-a 308 to the new one; the wizard under the company, and a report refused under another
-company's address.
+a 308 to the new one. (The report wizard's addresses went with Flask's HTML on 2026-10-20; its
+old company addresses open the company's Petty Cash.)
 """
 
 from __future__ import annotations
-
-from datetime import date
 
 import char_factories as F
 import pytest
@@ -79,7 +77,8 @@ def test_a_full_uuid_or_an_old_name_redirects_to_the_current_address(shop, clien
         assert resp.status_code == 308, old
         assert resp.headers["Location"] == f"{canonical}/petty-cash/reports?page=2"
 
-    assert client.get(f"{canonical}/petty-cash/reports").status_code == 200
+    # the report list is minty-petty-cash-web's: a hand-off, not a page
+    assert client.get(f"{canonical}/petty-cash/reports").status_code == 302
 
 
 def test_an_unknown_company_is_left_to_the_usual_guards(shop, client):
@@ -103,8 +102,8 @@ def test_an_unknown_company_is_left_to_the_usual_guards(shop, client):
         ("/entity/settings/payments/{id}", "/settings/payment-request"),
         ("/entity/{id}/bills", "/payment-request"),
         ("/invitation/xero-not-connected/{id}", "/xero-not-connected"),
-        ("/entity/{id}/report/opening", "/petty-cash/reports/new/opening"),
-        ("/entity/{id}/ending", "/petty-cash/reports/summary"),
+        ("/entity/{id}/report/opening", "/petty-cash"),
+        ("/entity/{id}/ending", "/petty-cash"),
     ],
 )
 def test_every_old_address_is_a_308_to_the_new_one(shop, client, old, tail):
@@ -131,42 +130,3 @@ def test_petty_cash_pages_moved_under_petty_cash(shop, client):
         assert resp.status_code == 308 and resp.headers["Location"] == new + "?x=1", old
     assert client.get(f"{co}/petty-cash").status_code in (200, 302)
 
-
-def _open_report(client, entity):
-    from models.db import Report
-
-    client.post("/report/opening", data={
-        "entity_id": entity.id, "transaction_date": F.iso(date(2026, 9, 1)),
-        "opening_balance": "1000.00", "cash_addition": "0", "action_type": "save_next",
-    })
-    with client.application.app_context():
-        return str(Report.query.filter(Report.company == entity.id).first().id)
-
-
-def test_an_old_wizard_address_moves_under_the_company(shop, client):
-    owner, entity, _ = shop
-    F.login(client, owner)
-    report_id = _open_report(client, entity)
-
-    resp = client.get(f"/report/{report_id}/cash_count?entity_id={entity.id}&edit=true")
-    assert resp.status_code == 308
-    assert resp.headers["Location"] == f"{F.co(client, entity.id)}/petty-cash/reports/{report_id}/cash-count?edit=true"
-
-    resp = client.get(f"/report/sale?entity_id={entity.id}&transaction_date=2026-09-01")
-    assert resp.headers["Location"] == f"{F.co(client, entity.id)}/petty-cash/reports/new/sale?transaction_date=2026-09-01"
-
-
-def test_a_report_under_another_companys_address_is_refused(shop, client):
-    owner, entity, other = shop
-    F.login(client, owner)
-    report_id = _open_report(client, entity)
-
-    assert client.get(f"{F.co(client, entity.id)}/petty-cash/reports/{report_id}/sale").status_code == 200
-    assert client.get(f"{F.co(client, other.id)}/petty-cash/reports/{report_id}/sale").status_code == 404
-
-
-def test_signed_out_old_wizard_addresses_say_nothing_about_the_company(shop, client):
-    _, entity, _ = shop
-    resp = client.get(f"/report/{entity.id}/sale")
-    assert resp.status_code == 302
-    assert "/entity/" not in resp.headers["Location"]

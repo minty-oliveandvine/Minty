@@ -1,11 +1,11 @@
 """Characterisation: the Xero sync tables (C5) - ``account_info`` / ``entity_account_xero``,
 ``xero_contact_sync``, ``xero_report_sync`` - through the services that write them and the
-pages that read them. Xero is stubbed at the integration functions, which is where the
+Petty Cash API that reads them (Flask's Jinja pages until 2026-10-20). Xero is stubbed at the integration functions, which is where the
 transport already ends (``get_accounts_from_xero`` / ``get_contacts_from_xero``).
 
 Pins: a chart-of-accounts sync records each active Xero account once and drops the ones Xero
 no longer lists; a contact sync inserts and updates but never removes; an expense line links
-to the synced account and contact and the page shows their code and name; a publish leaves
+to the synced account and contact and the Expenses read shows their code and name; a publish leaves
 ONE ``xero_report_sync`` row per report that the republish flow reads back; that row goes
 with the report when the report is deleted (schema: ``fk_xrs_report ... ON DELETE CASCADE``).
 
@@ -157,19 +157,29 @@ def test_an_expense_line_shows_the_synced_account_code_and_contact_name(shop, cl
 
     F.login(client, owner)
     open_report(client, entity, REPORT_DATE, opening="100.00")
-    form = {"entity_id": entity.id, "transaction_date": F.iso(REPORT_DATE), "item": "Flyers", "amount": "12.50",
-            "remarks": "", "accountId": "acc-0001", "contactId": "con-0001", "files[0][0]": F.receipt("Flyers.jpg")}
-    resp = client.post("/report/expense/add", data=form, content_type="multipart/form-data")
-    assert resp.status_code == 200, resp.data[:300]
-    body = resp.get_json()
-    assert body["expense"]["account_code"] == "400"
-    assert body["expense"]["contact_name"] == "ABC Supplies"
+    from io import BytesIO
 
-    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/expense?transaction_date={F.iso(REPORT_DATE)}")
-    html = page.get_data(as_text=True)
-    assert 'data-expense-account-code="400"' in html
-    assert 'data-expense-account-id="acc-0001"' in html
-    assert 'data-expense-contact-name="ABC Supplies"' in html
+    from werkzeug.datastructures import FileStorage
+
+    from blueprints.report.services.expenses import add_expense
+    from blueprints.report.services.opening import find_draft
+    from models.db import User, db
+
+    with app.app_context():
+        # the line by its Xero ids, as the Expenses step stores it (the model resolves the rows)
+        line = add_expense(find_draft(entity.id, REPORT_DATE), db.session.get(User, owner.id), item="Flyers",
+                           amount=12.5, remarks="", contact_id="con-0001", contact_name=None, account_id="acc-0001",
+                           account_code=None, files=[FileStorage(BytesIO(b"\xff\xd8\xff"), filename="Flyers.jpg",
+                                                                 content_type="image/jpeg")])
+        assert (line.account_code, line.contact_name) == ("400", "ABC Supplies")
+
+    page = client.get(f"/api/petty-cash/v1/companies/{entity.id}/reports/expenses",
+                      query_string={"transaction_date": F.iso(REPORT_DATE)},
+                      headers=F.petty_cash_headers(app, owner.id))
+    assert page.status_code == 200, page.get_json()
+    [shown] = page.get_json()["lines"]
+    assert shown["account"]["id"] == "acc-0001" and shown["account"]["code"] == "400"
+    assert shown["supplier"] == {"id": "con-0001", "name": "ABC Supplies"}
 
 
 # ---- the publish record --------------------------------------------------------------------
@@ -206,8 +216,9 @@ def test_deleting_the_report_deletes_its_sync_row(shop, client, app):
     with app.app_context():
         publish_record.record_object(report_id, ORG, "deposit", "bt-0001", object_type="BANK_TRANSFER", amount=500.0)
 
-    resp = client.post(f"/report/delete/{report_id}")
-    assert resp.status_code == 302, resp.data[:300]
+    resp = client.delete(f"/api/petty-cash/v1/companies/{entity.id}/reports/{report_id}",
+                         headers=F.petty_cash_headers(app, owner.id))
+    assert resp.status_code == 200, resp.get_json()
     with app.app_context():
         assert XeroReportSync.query.filter_by(report_id=report_id).count() == 0
         assert XeroReportSync.query.count() == 0, "no orphaned sync row either"

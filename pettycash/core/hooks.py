@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
 import time
 from urllib.parse import urlsplit
 
-from flask import (flash, has_request_context, jsonify, redirect,
-                   render_template, request, send_from_directory, session,
+from flask import (flash, jsonify, redirect,
+                   request, session,
                    url_for)
 from flask_login import current_user, user_logged_in, user_logged_out
 from flask_wtf.csrf import CSRFError
@@ -13,9 +12,7 @@ from loguru import logger
 from werkzeug.exceptions import HTTPException
 
 from blueprints.shared import preview_origin
-from blueprints.shared.safe_redirect import safe_referrer
 from pettycash.core import http_hardening
-from models.db import Entity
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token, token_expired)
 from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
@@ -59,29 +56,6 @@ def drop_flashes_leaving_flask(response):
     return response
 
 
-def _wants_json():
-    """True when the caller is a fetch()/XHR that will try to parse JSON.
-
-    Match "/api/" anywhere in the path, not just as a prefix. Blueprints register
-    with no url_prefix, so routes mount at their literal path — and while most sit
-    at /api/..., the user_management and invitation ones are declared as
-    /minty/api/... A startswith("/api") check missed exactly those, handing
-    fetch() an HTML error page that then died in response.json().
-
-    Every route containing "/api/" returns JSON today, so the wider match cannot
-    catch an HTML page; if that ever stops being true, key off request.blueprint
-    or the Accept/X-Requested-With clauses rather than the path.
-    """
-    if not has_request_context():
-        return False
-    return (
-        "/api/" in request.path
-        or request.is_json
-        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        or "application/json" in (request.headers.get("Accept") or "").lower()
-    )
-
-
 def init_app(app, db):
     @app.errorhandler(500)
     def handle_500_error(exception):
@@ -102,25 +76,14 @@ def init_app(app, db):
         logger.error(
             f"INTERNAL SERVER ERROR: {json.dumps(error_info, indent=2)}")
 
-        if request and "/report/expense/submit_all" in request.path:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Something went wrong on my end while submitting your expenses. Mind trying again?",
-                    }),
-                500,
-            )
-
         # Friendly, non-technical fallback. The technical detail (type,
         # traceback) is already logged above; the user only sees plain guidance.
         friendly_message = (
             "Something interrupted that action. We've logged it on our end — "
             "please try again, and let us know if it keeps happening."
         )
-        if _wants_json():
-            return jsonify({"status": "error", "message": friendly_message}), 500
-        return render_template("errors.html", error=friendly_message), 500
+        # Flask draws no page (2026-10-20): every error is JSON.
+        return jsonify({"status": "error", "message": friendly_message}), 500
 
     # Only the 500 and CSRF handlers existed. Nothing handled 400/401/403/404/405,
     # so abort() and every @login_required rejection returned Werkzeug's HTML error
@@ -145,7 +108,7 @@ def init_app(app, db):
         # Redirects are HTTPExceptions too (Werkzeug's trailing-slash
         # RequestRedirect is a 308). Turning one into a JSON body would break
         # the redirect, so only error statuses are rewritten.
-        if code < 400 or not _wants_json():
+        if code < 400:
             return exc
         message = HTTP_ERROR_COPY.get(
             code, "Something interrupted that action. Mind trying again?"
@@ -156,171 +119,6 @@ def init_app(app, db):
     def health_check():
         """Health check endpoint for Render"""
         return jsonify({"status": "healthy"}), 200
-
-    @app.route("/favicon.ico")
-    def favicon():
-        """The tab icon for the legacy pages that declare no ``<link rel="icon">`` (and for
-        error pages): browsers fall back to this path. The same file the templates link."""
-        return send_from_directory(
-            os.path.join(app.static_folder, "img"),
-            "favicon.ico",
-            mimetype="image/x-icon",
-            max_age=86400,
-        )
-
-    @app.context_processor
-    def inject_globals():
-        from blueprints.report.services.daily_closing import report_status, stage_hrefs, stage_of, stage_progress
-        from blueprints.report.services.report_page import report_facts
-        from blueprints.shared.sidebar import sidebar_context
-
-        def bills_app_handoff_url(entity_id):
-            """Module 2 (Bills) home for this entity — JWT landing with ``next=/``."""
-            if not entity_id:
-                return url_for("entity.entity_list")
-            if not current_user.is_authenticated:
-                return url_for("auth.home")
-            org = Entity.query.get(entity_id)
-            if not org:
-                return url_for("entity.module_selector", entity_id=entity_id)
-            from blueprints.entity.routes.modules import billing_app_home_url
-
-            return billing_app_home_url(entity_id, org, current_user.id)
-
-        def bills_app_profile_url(entity_id):
-            """The profile, opened from inside ``entity_id`` - through ``entity.open_profile``,
-            which hands over to minty-web's My Profile and mints the token at the click
-            rather than at this page's render. Its back arrow returns to the page the person
-            came from (no ``?from=`` flag since 2026-10-05).
-            """
-            if not entity_id:
-                return url_for("entity.entity_list")
-            return url_for("entity.open_profile", entity_id=entity_id)
-
-        def bills_app_profile_unscoped_url():
-            """The profile with no company in context (the Select Company header) - through
-            ``entity.open_profile``, as ``bills_app_profile_url``."""
-            return url_for("entity.open_profile")
-
-        def is_billing_enabled(entity_id):
-            """Check if billing module is enabled for the given entity."""
-            if not entity_id:
-                return True
-            try:
-                from blueprints.entity.routes.modules import _is_module_enabled
-                from blueprints.entity.services.modules import MODULE_BILL
-
-                # MODULE_BILL is PAYMENT_REQUEST since C2; the literal "BILL" this read
-                # until 2026-09-18 was an unknown code, which the gate answers NO to, so
-                # the Payment Settings tab and the side panel's Payment Request group were
-                # never shown to anyone.
-                return _is_module_enabled(str(entity_id), MODULE_BILL)
-            except Exception as e:
-                logger.error(f"Error checking billing enabled for entity {entity_id}: {e}")
-                return True
-
-        def is_petty_cash_enabled(entity_id):
-            """Check if petty cash module is enabled for the given entity.
-
-            Mirrors is_billing_enabled — returns True on missing entity or any
-            lookup error so a transient DB hiccup never silently hides nav.
-            """
-            if not entity_id:
-                return True
-            try:
-                from blueprints.entity.routes.modules import _is_module_enabled
-                return _is_module_enabled(str(entity_id), "PETTY_CASH")
-            except Exception as e:
-                logger.error(
-                    f"Error checking petty cash enabled for entity {entity_id}: {e}"
-                )
-                return True
-
-        def _entity_currency_symbol():
-            """ISO code of the request entity's selected currency
-            (entities.currency_id -> currency_info.currency_code, e.g. "HKD").
-
-            Money amounts across the UI render with the ISO code, not the
-            symbol. The entity is taken from ``entity_id`` / ``org_id`` in the
-            query string or URL view args (never the bare ``id`` view arg — on
-            report routes that's a report id). Falls back to "$" when no
-            entity or currency resolves. Routes that pass an explicit
-            ``currency_symbol`` to render_template override this default.
-            """
-            # Context processors run for EVERY render_template, including the ones
-            # with no request behind them (an email rendered from a CLI job). Touching
-            # `request` there raises, and the handler below logs it at ERROR, so a
-            # healthy run would fill the log with errors about a value it never asks for.
-            # There is no request entity to resolve outside a request; "$" is the
-            # answer, not a failure.
-            if not has_request_context():
-                return "$"
-            try:
-                view_args = request.view_args or {}
-                entity_id = (
-                    request.args.get("entity_id")
-                    or request.args.get("org_id")
-                    or view_args.get("entity_id")
-                    or view_args.get("org_id")
-                )
-                if not entity_id:
-                    return "$"
-                org = Entity.query.get(str(entity_id).strip())
-                if org and org.currency_id:
-                    from models.db import CurrencyInfo
-
-                    currency = CurrencyInfo.query.get(org.currency_id)
-                    if currency and currency.currency_code:
-                        return currency.currency_code
-            except Exception as exc:
-                logger.error(f"currency_symbol lookup failed: {exc}")
-            return "$"
-
-        def is_readonly_for(entity_id):
-            """True when the current user is a superuser viewing an entity
-            they have no user_entity row on. Templates should disable any
-            action buttons (create/edit/delete/publish) when this is True.
-            """
-            if not current_user.is_authenticated:
-                return False
-            try:
-                from services.permission_policy import is_superuser_readonly
-                return is_superuser_readonly(current_user, entity_id)
-            except Exception as exc:
-                logger.error(f"is_readonly_for failed entity={entity_id}: {exc}")
-                return False
-
-        def company_home_url(entity_id):
-            """Where a settings page's "‹ Back" goes when there is no history to go back
-            through (a new tab, a bookmark): the company's home - its Petty Cash dashboard,
-            or the payments app when Petty Cash is off (the choice ``sidebar._settings``
-            makes too). static/js/back_link.js does the rest."""
-            if is_petty_cash_enabled(entity_id):
-                return url_for("entity.report_dashboard", id=entity_id)
-            return url_for("entity.go_to_bills", entity_id=entity_id)
-
-        return {
-            "DD_CLIENT_TOKEN": os.environ.get(
-                "DD_CLIENT_TOKEN", "pub8127bb0367f2b74cbba93dad6f012b90"
-            ),
-            "bills_app_handoff_url": bills_app_handoff_url,
-            "bills_app_profile_url": bills_app_profile_url,
-            "bills_app_profile_unscoped_url": bills_app_profile_unscoped_url,
-            "is_billing_enabled": is_billing_enabled,
-            "is_petty_cash_enabled": is_petty_cash_enabled,
-            "company_home_url": company_home_url,
-            "is_readonly_for": is_readonly_for,
-            # the sidebar's menu and links (components/minty_sidebar.html)
-            "sidebar_context": sidebar_context,
-            # the redesigned Daily Closing's stages (templates/petty_cash/closing_base.html)
-            "stage_progress": stage_progress,
-            "stage_of_section": stage_of,
-            "stage_hrefs": stage_hrefs,
-            "report_status": report_status,
-            # the Daily Report's lines, receipts and audit facts (report/ending.html, report/close.html)
-            "report_facts": report_facts,
-            "currency_symbol": _entity_currency_symbol(),
-        }
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):
@@ -373,22 +171,13 @@ def init_app(app, db):
                     "Blocked readonly-superuser write user=%s entity=%s path=%s",
                     current_user.id, entity_id, request.path,
                 )
-                if (
-                    request.is_json
-                    or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-                ):
-                    return (
-                        jsonify({
-                            "status": "error",
-                            "message": "You have read-only access to this entity - you can look, but not edit.",
-                        }),
-                        403,
-                    )
-                flash(
-                    "You have read-only access to this entity - you can look, but not edit.",
-                    "warning",
+                return (
+                    jsonify({
+                        "status": "error",
+                        "message": "You have read-only access to this entity - you can look, but not edit.",
+                    }),
+                    403,
                 )
-                return redirect(safe_referrer(url_for("entity.entity_list")))
         except Exception:
             logger.exception("block_readonly_superuser_writes failed")
         return None
@@ -520,26 +309,18 @@ def init_app(app, db):
     def handle_csrf_error(error):
         logger.warning(
             f"CSRF error: {getattr(error, 'description', str(error))}")
-        if (
-            request.headers.get("X-Requested-With") == "XMLHttpRequest"
-            or request.is_json
-        ):
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "code": "csrf_expired",
-                        "message": getattr(
-                            error, "description", "CSRF token missing or expired"
-                        ),
-                    }
-                ),
-                400,
-            )
-        flash(
-            "This form went stale while you were away. Refresh and try again?",
-            "warning")
-        return redirect(safe_referrer(url_for("auth.home")))
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "csrf_expired",
+                    "message": getattr(
+                        error, "description", "CSRF token missing or expired"
+                    ),
+                }
+            ),
+            400,
+        )
 
     @app.after_request
     def after_request_middleware(response):

@@ -1,14 +1,21 @@
+"""Creating a company makes its creator the company's admin - through the onboarding wizard's
+``POST /api/onboarding/create`` (Flask's ``POST /entity/create`` form went 2026-10-20; both used
+``create_entity_for_user``)."""
+
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import jwt
 import pytest
 from werkzeug.security import generate_password_hash
 
 
-def _login(client, user_id: str) -> None:
-    with client.session_transaction() as sess:
-        sess["_user_id"] = user_id
+def _onboarding_bearer(app, user_id: str) -> dict:
+    now = datetime.now(timezone.utc)
+    payload = {"user_id": user_id, "scope": "onboarding", "exp": now + timedelta(minutes=10), "iat": now}
+    return {"Authorization": "Bearer " + jwt.encode(payload, app.config["SECRET_KEY"], algorithm="HS256")}
 
 
 
@@ -50,33 +57,25 @@ def _make_user(db):
 def test_normal_user_can_create_entity_and_becomes_entity_admin(app, client, db_session):
     from models.db import Entity, EntitySaleSetting, User, UserEntity
 
-    from blueprints.legal.services.consent import record_consent
+    import char_factories as F
 
     with app.app_context():
-        creator = _make_user(db_session)
-        creator_id = creator.id
-        # a signed-in person has agreed to the Terms; otherwise the acceptance gate answers
-        # the POST itself with a redirect to the entity list and the view never runs
-        record_consent(creator_id, source="gate")
-        db_session.session.commit()
-
-    _login(client, creator_id)
+        creator_id = _make_user(db_session).id
+        F.seed_country(db_session, F.seed_currency(db_session))
 
     response = client.post(
-        "/entity/create",
-        data={
+        "/api/onboarding/create",
+        json={
             "entity_name": "Creator Admin Entity",
             "country_code": "HK",
             "currency_code": "HKD",
             "contact_phone": "12345678",
             "business_email": "entity@test.com",
         },
-        follow_redirects=False,
+        headers=_onboarding_bearer(app, creator_id),
     )
 
-    assert response.status_code == 302
-    assert response.location is not None
-    assert "/entity/success?entity_id=" in response.location  # the success page names the company
+    assert response.status_code == 201, response.get_json()
 
     with app.app_context():
         created_entity = Entity.query.filter_by(name="Creator Admin Entity").one()

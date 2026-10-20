@@ -71,12 +71,13 @@ def _make_user(db_session, *, id_token=None, username="idle.user"):
     return user
 
 
-def _login(client, username="idle.user"):
-    resp = client.post(
-        "/login",
-        data={"username": username, "password": "password123"},
-        follow_redirects=False,
-    )
+def _login(app, client, user_id):
+    """Sign in through the email-code hand-off (the password page went 2026-10-20)."""
+    from blueprints.auth.routes.email_auth import _mint_handoff_url
+
+    with app.test_request_context():
+        url = _mint_handoff_url(user_id)
+    resp = client.get(url, follow_redirects=False)
     assert resp.status_code == 302
     return resp
 
@@ -117,7 +118,7 @@ def test_login_resets_idle_window_despite_stale_last_activity(app, client, db_se
     """Regression: a stale ``last_activity`` left in a reused session must NOT
     log the user out immediately after a fresh login. The user_logged_in signal
     resets the idle window at login time."""
-    _make_user(db_session)
+    user_id = _make_user(db_session).id
 
     # Simulate a stale idle marker left over from a previous session (cookie
     # reused). Without the reset-on-login fix this triggers an instant logout.
@@ -125,7 +126,7 @@ def test_login_resets_idle_window_despite_stale_last_activity(app, client, db_se
     with client.session_transaction() as sess:
         sess["last_activity"] = time.time() - (idle_limit + 10_000)
 
-    _login(client)
+    _login(app, client, user_id)
 
     resp = client.get("/index", follow_redirects=False)
     assert resp.status_code == 302
@@ -138,14 +139,13 @@ def test_login_resets_idle_window_despite_stale_last_activity(app, client, db_se
 
 def test_request_within_idle_window_is_allowed(app, client, db_session):
     """Recent activity keeps the session alive — no idle logout."""
-    _make_user(db_session)
-    _login(client)
+    _login(app, client, _make_user(db_session).id)
 
     with client.session_transaction() as sess:
         sess["last_activity"] = time.time() - 5  # just now
 
     resp = client.get("/index", follow_redirects=False)
-    # /index with no entity_id redirects to /entity — the point is it is NOT
+    # /index redirects to /entity — the point is it is NOT
     # the idle-logout redirect and NOT a 401.
     assert resp.status_code == 302
     location = resp.location or ""

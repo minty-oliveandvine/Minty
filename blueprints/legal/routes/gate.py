@@ -58,21 +58,16 @@ ALLOWED_ENDPOINTS = frozenset(
         "health_check",
         # --- Getting in ---------------------------------------------------
         "auth.home",
-        "auth.login",
         "auth.register",
         # the sign-in page's messages (minty-web's /login, phase 2)
         "auth.auth_notices",
         "auth.email_request_code",
         "auth.email_verify_code",
         "auth.email_handoff",
-        "auth.reset_request",
-        "auth.reset_token",
         # --- Getting out --------------------------------------------------
         # Non-negotiable. Someone who reads the Terms and refuses has to be
         # able to leave; without this the acceptance screen is a trap.
         "auth.logout",
-        # --- Dead ends that must not redirect into the gate ---------------
-        "auth.no_permission",
         # --- Arriving on an invite link -----------------------------------
         # This route renders nothing. It validates the token and bounces to
         # the onboarding sign-in page, which carries its own Terms tick box
@@ -82,7 +77,7 @@ ALLOWED_ENDPOINTS = frozenset(
         # makes the invite link silently do nothing for anyone who has not
         # agreed yet, which is the largest group of people who ever receive
         # one. Deliberately NOT extended to invitation.xero_not_connected:
-        # that one renders a template and stays gated.
+        # it leads into a company's settings and stays gated.
         "invitation.accept_invitation_page",
         # --- Where the gate sends people ----------------------------------
         # THE critical entry. This route renders nothing: it hands the browser

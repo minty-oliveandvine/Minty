@@ -11,9 +11,7 @@ from services.auth.token_service import ensure_valid_token
 @login_required
 def check_token():
     response = ensure_valid_token(current_user)
-    if response:
-        return "Valid Token"
-    return "expired_token"
+    return jsonify({"status": "Valid Token" if response else "expired_token"})
 
 
 @auth_bp.route("/refresh_token", methods=["POST"])

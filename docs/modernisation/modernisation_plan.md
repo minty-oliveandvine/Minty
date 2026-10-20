@@ -2699,11 +2699,9 @@ which now pulls in the host and `next/navigation` **before any test file's `vi.m
 binding the real modules for good. It lazy-imports inside the hook now - which is what
 minty-payment-request-web's `test/setup.dom.ts` had already been doing, for this exact reason.
 
-Flask's pages carry a Jinja port (`templates/components/minty_sidebar.html`,
-`static/js/minty_sidebar.js`, `blueprints/shared/sidebar.py`; Minty `docs/features/sidebar.md`)
-that a TypeScript package cannot serve, and **the shared packages are Next.js-only by the user's
-rule (2026-10-12)**: Flask is not a consumer and gains no "change both" obligation. Those pages
-retire in Part 3.
+**The shared packages are Next.js-only by the user's rule (2026-10-12)**: Flask is not a
+consumer. Flask's Jinja port of the sidebar went with all of its pages on 2026-10-20, when Flask
+became backend only.
 
 ## Links between services — one shape (rule 10, added 2026-09-21)
 

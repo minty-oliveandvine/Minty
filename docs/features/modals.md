@@ -5,81 +5,14 @@ modals is going to be designed accross repos". minty-web's family is the design 
 `ModalFrame` (the blurred page and the card over it), `ConfirmDialog` (the title with Minty
 beside it, the sentences, the secondary button and the confirming one in its tone) and
 `SheetFrame`-style sheets for forms. **Every new modal follows it; an existing one changes when
-its page is next worked on.** The sources are minty-web's
-`features/subscription/components/{ModalFrame,ConfirmDialog,InterruptedDialogs}.tsx` and
-`lib/changeModal.ts`. Change both together (minty-web, here).
+its page is next worked on.** The sources are minty-web's `components/ui/ModalFrame.tsx`,
+`components/ui/ConfirmDialog.tsx`, `components/ui/LeaveDialog.tsx` ("Leave without saving?",
+Figma A-11), `lib/leaveGuard.ts` and `features/subscription/components/InterruptedDialogs.tsx`.
 
 **minty-payment-request-web left this family on 2026-10-13** (the owner: Part 14 wins there): its
 modals are Part 14's (`components/ui/Overlay.tsx` - `Modal`, `Drawer`; see its
-`docs/features/payment-requests.md`), and its copies of `ModalFrame`, `ConfirmDialog` and
-`changeModal.ts` are deleted. Only the WORDS of "Leave without saving?" are still shared with it
-(`InterruptedDialogs.tsx`). minty-web and this port follow when they migrate to Parts 13–15
-(`docs/design/`).
+`docs/features/payment-requests.md`). Only the WORDS of "Leave without saving?" are still shared
+with it. minty-web follows when it migrates to Parts 13–15 (`docs/design/`).
 
-## The Flask port
-
-A PORT, not a copy — `@minty/shared` is TypeScript and cannot serve Jinja; it retires with the
-Jinja pages (Part 3).
-
-| File | What it is |
-|---|---|
-| `templates/components/minty_dialog.html` | include ONCE in a page's `<head>`, before the page's own scripts |
-| `static/js/minty_dialog.js` | `MintyDialog.confirm(...)` and `MintyLeaveGuard` |
-| `static/css/minty_dialog.css` | the look, value for value, scoped under `#minty-dialog` |
-| `static/img/portal/minty-dont.png`, `minty-surprised.png` | the two pictures it ships (minty-web's `public/portal/`) |
-
-`MintyDialog.confirm({title, body, image, confirmLabel, confirmTone, backLabel, backTone, safe,
-name})` resolves `"confirm"`, `"back"` or `"dismiss"` (Escape or the backdrop — the safe way
-out). `image` is `"dont"` or `"surprised"`; `confirmTone` teal / orange / red; `backTone` grey /
-teal; `safe` names the button focused first (the one that changes nothing); `name` lands on the
-dialog as `data-modal`, for tests. `body` is a list of sentences — a string, or pieces with
-`{strong: "..."}` — always put in as text.
-
-Mechanics: the script builds the dialog on first use as the page's last element (outside any
-fade or stacking context), at **z-index 250** — above the sidebar drawer (200), so a link pressed
-inside the open drawer asks over it; below the loading overlays (300) and the flash toast (400).
-It opens by an attribute (`data-open`), not `[hidden]`. The backdrop is the card's sibling.
-Escape is caught on the way down, so the drawer under the dialog stays open. Tab stays on the
-card's two buttons; focus goes back where it was when the dialog closes.
-
-## "Leave without saving?" (Figma A-11)
-
-`MintyLeaveGuard.watch(isDirty)` arms it for a page with unsaved changes; minty-web's
-`LeaveDialog` (`components/ui/LeaveDialog.tsx` there, moved out of the subscription feature on
-2026-10-09 when Entity & Integration needed it too) words: "You have unsaved changes." / "Your changes will be lost if you leave this
-page.", the "dont" Minty, **Discard changes** (teal outline) and **Go Back** (teal).
-
-- A click on a link that would leave the page is held (on `window`, in the capture phase, before
-  the page's own handlers) and the dialog asks. Let through: `#` and `javascript:` links,
-  non-http(s) links, any `target` other than `_self`, `download`, modifier and middle clicks,
-  `[data-sidebar-open]` (the initials and the ≡ open the sidebar), a jump within the page
-  (same address, a `#fragment`), and links inside the dialog. **A link to exactly this
-  address DOES ask** — it reloads (the current pill, the sidebar's Settings).
-- **Discard changes** replays the original click once, so each link keeps its own behaviour
-  (the sidebar closing, a fade, a full load); the browser's own prompt is switched off first.
-- `beforeunload` gives the browser's own prompt for a reload, a closed tab, a typed address and
-  Back/Forward.
-- `saving()` before the page's own `form.submit()`; `ask(proceed)` for an exit that is not a
-  link.
-
-minty-payment-request-web's `lib/leaveGuard.ts` (`useLeaveGuard`, `guardLeave`) does the same with
-the same rules, for its Payment Request Settings, and since 2026-10-09 minty-web has the same file
-(copied, not re-written - change all three). Both Next apps hold Back/Forward too, which this
-guard does not: they push a history SENTINEL at their own address while dirty, so a soft Back pops
-that instead of leaving, and the Navigation API's entry index tells a several-entry jump from a
-single step. Flask gets the browser's own prompt there instead.
-
-## Where it is used
-
-- Petty Cash Settings ([petty-cash-settings.md](petty-cash-settings.md)): the leave guard, and
-  the delete-method confirm ("Delete Electronic Method", the surprised Minty, Go back / a red
-  Delete).
-- minty-payment-request-web Payment Request Settings (its `docs/features/settings.md`): the leave guard, and its
-  Logout asks first.
-- minty-web, since 2026-10-09 (its `docs/features/company-settings.md`): Entity & Integration, the
-  billing details and edit-card screens, and Logout. Adding a card does not ask - the fields are
-  Stripe's, in its iframe.
-
-Not yet: the report pages' modals. (Users' and Entity & Integration's went with their pages
-to minty-web in phase 2, where they are minty-web's own `ConfirmDialog` - and, for leaving, its
-own copy of this guard.) They change when their page is next worked on.
+**Minty (Flask) has no modals since 2026-10-20**: it draws no page. Its port (`MintyDialog`,
+`MintyLeaveGuard`) went with its templates; each screen's dialogs are its Next app's.

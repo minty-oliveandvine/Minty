@@ -26,8 +26,7 @@ from loguru import logger
 
 from services.app_runtime.env import is_development
 
-#: Route arguments whose value is a secret: ``/reset_password/<token>``,
-#: ``/invitation/accept/<token>``, ``/Minty_Report/<path:entity_and_date>/`` and
+#: Route arguments whose value is a secret: ``/invitation/accept/<token>``, ``/Minty_Report/<path:entity_and_date>/`` and
 #: ``/api/petty-cash/v1/public/share/<path:share_path>`` (their last segment is the share secret).
 SECRET_PATH_ARGS = frozenset({"token", "entity_and_date", "share_path"})
 

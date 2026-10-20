@@ -245,56 +245,37 @@ def test_failed_code_email_keeps_the_previous_code_and_allows_a_retry(
         assert rows[0].attempts == 2
 
 
-def test_login_redirects_superuser_to_admin(app, client, db_session):
+def _sign_in(app, client, user_id):
+    """The email-code hand-off - where every sign-in ends since the password page went
+    (2026-10-20)."""
+    from blueprints.auth.routes.email_auth import _mint_handoff_url
+
+    with app.test_request_context():
+        url = _mint_handoff_url(user_id)
+    return client.get(url, follow_redirects=False)
+
+
+@pytest.mark.parametrize("role", ["SYSTEM_ROLE_SUPERUSER", "SYSTEM_ROLE_NORMAL"])
+def test_sign_in_lands_everyone_on_the_company_list(app, client, db_session, role):
+    """The superadmin's Flask pages (/admin) went on 2026-10-20: everyone lands on /index."""
     from models.db import User
 
     with app.app_context():
         user = User(
             id=str(uuid.uuid4()),
-            email="super.user@test.com",
-            username="super.user",
-            first_name="Super",
-            last_name="User",
-            password=generate_password_hash("password123"),
-            system_role=User.SYSTEM_ROLE_SUPERUSER,
+            email="signed.in@test.com",
+            username="signed.in",
+            first_name="Signed",
+            last_name="In",
+            password=generate_password_hash("unused"),
+            system_role=getattr(User, role),
             approved=True,
         )
         db_session.session.add(user)
         db_session.session.commit()
+        user_id = user.id
 
-    response = client.post(
-        "/login",
-        data={"username": "super.user", "password": "password123"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 302
-    assert response.location is not None
-    assert response.location.endswith("/admin")
-
-
-def test_login_redirects_normal_user_to_home(app, client, db_session):
-    from models.db import User
-
-    with app.app_context():
-        user = User(
-            id=str(uuid.uuid4()),
-            email="normal.user@test.com",
-            username="normal.user",
-            first_name="Normal",
-            last_name="User",
-            password=generate_password_hash("password123"),
-            system_role=User.SYSTEM_ROLE_NORMAL,
-            approved=True,
-        )
-        db_session.session.add(user)
-        db_session.session.commit()
-
-    response = client.post(
-        "/login",
-        data={"username": "normal.user", "password": "password123"},
-        follow_redirects=False,
-    )
+    response = _sign_in(app, client, user_id)
 
     assert response.status_code == 302
     assert response.location is not None

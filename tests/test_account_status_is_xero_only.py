@@ -9,14 +9,15 @@ Discrepancy account had no option, the page could not select it, and the save wa
 "Please select: Discrepancy account code".
 
 Pins: a tick save leaves ``status`` alone; the Xero refresh writes no ticks; onboarding step 5
-ticks from its posted codes; a saved mapping choice is always among its field's options.
+ticks from its posted codes; a saved mapping choice is always among its field's options. The saves
+and the options are the Petty Cash API's (``/settings/xero``) since Flask's page went (2026-10-20).
 """
 
 from __future__ import annotations
 
-import re
-
 import pytest
+from test_petty_cash_api_settings import call
+from test_petty_cash_api_xero_settings import xero  # noqa: F401  (fixture)
 
 import char_factories as F
 
@@ -41,6 +42,8 @@ def shop(app, db):
         country = F.seed_country(db, currency)
         owner = F.make_user(db, "owner@test.com")
         entity = F.make_entity(db, owner, currency=currency, country=country)
+        entity.xero_org_id = "org-1111"
+        db.session.commit()
     return owner, entity
 
 
@@ -80,16 +83,15 @@ def ticks(app, entity_id) -> dict:
     return {code: active for code, active in rows}
 
 
-def test_a_tick_save_leaves_account_status_alone(shop, xero_live, app, db, client):
+def test_a_tick_save_leaves_account_status_alone(shop, xero, app, db, client):  # noqa: F811
     owner, entity = shop
     add_account(app, db, entity.id, "acc-ads", "EXPENSE", "400", "Advertising", ticked=True)
     add_account(app, db, entity.id, "acc-fees", "EXPENSE", "404", "Bank Fees", ticked=True)
     add_account(app, db, entity.id, "acc-loan", "CURRLIAB", "800", "Director Loan")
-    F.login(client, owner)
 
-    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"account_codes[]": ["404"]})
+    resp = call(app, client, "PUT", entity, owner, "/settings/xero/account-codes", json={"codes": ["404"]})
 
-    assert resp.status_code == 302
+    assert resp.status_code == 200, resp.get_json()
     assert ticks(app, entity.id) == {"400": False, "404": True}
     assert statuses(app, entity.id) == {"400": "ACTIVE", "404": "ACTIVE", "800": "ACTIVE"}
 
@@ -130,7 +132,7 @@ def test_onboarding_ticks_come_from_the_posted_codes(shop, app, db):
     assert statuses(app, entity.id) == {"400": "ACTIVE", "404": "ACTIVE", "800": "ACTIVE"}
 
 
-def test_a_saved_choice_is_always_among_its_options(shop, xero_live, app, db, client):
+def test_a_saved_choice_is_always_among_its_options(shop, xero, app, db, client):  # noqa: F811
     # Rows left INACTIVE by the old tick save (healed only by a connected re-sync)
     from models.db import EntityPettycashSettings
 
@@ -144,12 +146,12 @@ def test_a_saved_choice_is_always_among_its_options(shop, xero_live, app, db, cl
         db.session.add(EntityPettycashSettings(entity_id=entity.id, discrepancy_account_id=disc,
                                                director_account_id=loan))
         db.session.commit()
-    F.login(client, owner)
 
-    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
+    body = call(app, client, "GET", entity, owner, "/settings/xero").get_json()
 
-    discrepancy = re.search(r'<select name="discrepancy_account".*?</select>', html, re.S).group(0)
-    assert '<option value="400">Advertising - 400</option>' in discrepancy
-    assert '<option value="310">Cost of Goods Sold - 310</option>' in discrepancy
-    director = re.search(r'<select name="owners_account".*?</select>', html, re.S).group(0)
-    assert re.search(r'<option value="[^"]*">Director Loan - 800</option>', director)
+    fields = {f["key"]: f for f in body["mapping"]}
+    discrepancy, director = fields["discrepancy_account"], fields["owners_account"]
+    assert {"Advertising", "Cost of Goods Sold"} <= {o["name"] for o in discrepancy["options"]}
+    assert "Director Loan" in {o["name"] for o in director["options"]}
+    for field in (discrepancy, director):
+        assert field["selected"] in {o["id"] for o in field["options"]}, field

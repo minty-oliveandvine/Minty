@@ -165,9 +165,9 @@ def build_entity_list(user) -> list[dict]:
 
 
 def _category(raw: str) -> str:
-    """Flask's category, read the way ``templates/components/flash_messages.html`` reads it
-    for its own toasts: error/danger are errors, warning and info are themselves, and
-    everything else (``success``, the bare ``message`` default) is a success."""
+    """Flask's flash category as minty-web's toast reads it: error/danger are errors, warning
+    and info are themselves, and everything else (``success``, the bare ``message`` default)
+    is a success."""
     if raw in ("error", "danger"):
         return "error"
     if raw in ("warning", "info"):
