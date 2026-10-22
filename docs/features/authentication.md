@@ -353,8 +353,8 @@ set, Flask hands a person back into the set they came from instead of the config
 - The stored set is re-checked against the regex on every read, so unsetting the variable turns
   it all off at once. A value that could let in any host outside `https://pr-…\.dailyminty\.com$`
   (no anchors, a top-level `|`, another domain) refuses to boot
-  (`services/app_runtime/env.preview_origin_regex`; the APIs' `config/preview_origin.py` apply the
-  same rule to their CORS).
+  (`minty_shared.config.preview_origin_regex`, through Flask's
+  `services/app_runtime/env.preview_origin_regex`; the APIs apply the same function to their CORS).
 - `next` stays path-only (`safe_redirect.py` is unchanged): the set chooses the host, never the URL.
 
 **Which environment carries it is minty-infra's `var.preview_backend`: production until the
