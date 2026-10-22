@@ -19,7 +19,8 @@ instead of calling into `.github`, deliberately:
 `minty-shared-py` (2026-10-22, public, immutable `vX.Y` tags) makes the same call for Python: its
 own `ci.yml` runs Python 3.13, `pip install -e .[dev]`, then `ruff check`, `ruff format --check`,
 `pyright` (strict) and `pytest`. `py-package.yml` arrives with a second Python package
-(`minty-db`). Its five consumers (Minty and the four APIs) install it from the tag over HTTPS,
+(`minty-db`). Its five consumers (Minty and the four APIs) install it from the tag's archive over HTTPS (`.../archive/refs/tags/vX.Y.tar.gz`, never `git+`: the
+slim Docker images have no git),
 which works with no key only because the repo is public.
 
 It runs checkout -> Node 24 (what `next-web.yml` defaults to, and what Vercel builds the consumers
