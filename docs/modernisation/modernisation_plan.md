@@ -2612,8 +2612,13 @@ the matching `billing-backend/core/*` (`core/links.py` is the rule-10 module, be
 
 **Started 2026-10-22 (`v0.1`) with logging only**: `minty_shared.logctx` (the one line format, the
 trace/user/entity/step context, `logging_config`) and `minty_shared.log` (loguru's call shape over
-stdlib). It is stdlib-only, so it has no `minty-db` dependency yet; the `core/*` lift above is
-still to come.
+stdlib). **`v0.2` (2026-10-22)** lifts everything that needs no `minty-db`: `config` (the
+DATABASE_URL/S3/SMTP/preview-origin parsers, identifier-only `?schema=`), `money`, `time` (the one
+`DEFAULT_ENTITY_TIMEZONE`), `tokens` (extra `jwt`: `decode_bearer` with 60 s skew,
+`service_assertion`), `django.errors` (the one error envelope), `django.middleware`,
+`django.client` and `testing` (the pg-harness plugin, the guard helpers). The core stays
+stdlib-only; it is pinned by the tag's archive, not `git+`. `auth`, `permissions`, `policy` and
+the models still wait for `minty-db`.
 
 `minty-shared-ts` (package `@minty/shared`): lift `minty-web/lib/*` (including `lib/links.ts`,
 the rule-10 module) and `minty-web/components/ui/*` (Part 2, the newest copies) together with

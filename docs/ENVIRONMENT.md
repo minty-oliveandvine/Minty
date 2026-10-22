@@ -104,13 +104,17 @@ postgresql://USER:PASSWORD@HOST:5432/DBNAME?schema=pettycashv3[&sslmode=require.
 
 - Schemes `postgres`, `postgresql`, `postgresql+psycopg2`, `postgresql+psycopg` are accepted.
 - `?schema=` (default `pettycashv3`) names the one schema every service shares. It is popped
-  off and never passed to the driver; every other query parameter (`sslmode`, …) is kept.
+  off and never passed to the driver; every other query parameter (`sslmode`, …) is kept. Only a
+  plain identifier (letters, digits, `_`, not starting with a digit) is accepted - anything else
+  refuses to boot in every backend (2026-10-22; only Flask checked before). A blank value is unset.
 - User, password and database name are percent-decoded — encode special characters
   (`@` → `%40`, `:` → `%3A`, `/` → `%2F`). Port defaults to 5432.
 - Required by Petty Cash. The Django APIs fall back to `postgresql://postgres@localhost:5432/postgres`
   so settings import locally and in tests; always set it in a deployment.
-- Helpers: Flask `services/app_runtime/env.py` (`database_url()`, `database_schema()`);
-  Django `config/dburl.py` (`parse_database_url()`, `database_url()`).
+- One parser for all five backends: `minty_shared.config` (`parse_database_url()`,
+  `database_url_from_env()`, `django_database()`; also `S3_URL`, `SMTP_URL` and
+  `PREVIEW_ORIGIN_REGEX`). Flask's `services/app_runtime/env.py` re-exports it and adds
+  `database_url()` / `database_schema()`; the Django APIs' `config/dburl.py` copies are gone.
 - In a `.env` file, keep the schema as its own line and fill it into the URL — every service
   loads `.env` with python-dotenv, which expands `${...}`, and so does Docker Compose:
 
