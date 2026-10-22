@@ -162,7 +162,7 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
   (production's log held `/enter?token=` and `/callback?code=` lines, 2026-10-20), so
   `gunicorn.conf.py` sets `logger_class` to `services/app_runtime/gunicorn_logging.py`'s
   `NoAccessLogger`, which the environment cannot override; `http_hardening` logs `METHOD path status ms` with
-  the query string dropped and secret path segments shown as `[redacted]`. Loguru's `diagnose` (variable values in tracebacks) is on in development only, and the Xero
+  the query string dropped and secret path segments shown as `[redacted]`. Tracebacks carry no variable values (loguru and its `diagnose` were dropped 2026-10-22), and the Xero
   token refresh no longer logs its Basic `Authorization` header.
 - **No state change by GET**: publishing to Xero, disconnecting Xero and the invite Terms check
   (`POST`, the token in the body) all refuse GET.

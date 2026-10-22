@@ -62,19 +62,44 @@ app config points mail at nothing.
 
 ## Logging
 
-`loguru` everywhere (`logger.info(...)`), shipped off the host. Two rules the tests enforce: no token in a log line
-(`tests/test_zz_no_token_logging.py`) and no error message that leaks internals to the
-user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
+Standard-library `logging` since 2026-10-22: loguru is gone (`tests/test_zz_no_loguru.py`).
+Every Minty backend, Flask and the four Django APIs, writes one line, defined once in
+[`minty-shared-py`](https://github.com/minty-oliveandvine/minty-shared-py) (`minty_shared.logctx`):
+
+```
+2026-10-22T08:42:15.123Z INFO [trace=a1b2c3d4] [user=<uuid>|entity=<uuid>|step=xero.publish] message
+```
+
+- **Call sites are unchanged.** `from services.app_runtime.log import logger` is loguru's call
+  shape (`logger.info("{} issued", n)`, `logger.exception(...)`) over the stdlib `minty` logger.
+  Werkzeug's, xero_python's and urllib3's lines reach the same root handlers (stderr, and
+  `services/app_runtime/legacy/app.log` rotated at 5 MB with 10 kept), set once per process in
+  `bootstrap._setup_logging`.
+- **`trace`** is opened by `http_hardening.open_trace`, the `before_request` that runs straight
+  after `preview_origin.capture`, so it comes before every hook that logs. An `X-Request-ID` of
+  8-32 lowercase hex digits is kept (the Django APIs send theirs on every internal call);
+  anything else is replaced. The id is echoed on the response.
+- **`user` / `entity`** are bound only where they are verified: the session's `load_user`, a
+  bearer token's signature (`bearer_api.claims_from_bearer`, the person only), a backend's
+  service assertion (`_authenticate_internal_caller`, its company and person), and the Petty
+  Cash guard (the company once every check has passed).
+- **`step`** is the endpoint name unless code names one (`with logctx.log_step("…"):`).
+- **Threads** start through `logctx.carry_context(target)`, so a background Xero sync keeps the
+  request's trace.
+
+Two rules the tests enforce: no token in a log line (`tests/test_zz_no_token_logging.py`), and no error message that leaks internals to
+the user (`docs/features/ERROR_MESSAGE_LEAKS.md`). Tracebacks carry no variable values (loguru's
+`diagnose` went with it).
 
 The access log is Flask's own since 2026-10-05 (`pettycash/core/http_hardening.py`):
 `METHOD path status ms`, no query string, secret path segments `[redacted]`. gunicorn's
 `--access-logfile` is gone from the `Procfile` because it printed the whole request line,
 tokens included, and since 2026-10-20 `gunicorn.conf.py` (repo root, read from the working
 directory) gives gunicorn `NoAccessLogger`, because Render's native runtime turns the access
-log on through `GUNICORN_CMD_ARGS` anyway (`tests/test_gunicorn_access_log.py`). `diagnose` (variable values in tracebacks) is on in development only.
-On Windows, parallel pytest workers share `services/app_runtime/legacy/app.log`, and loguru's
-5 MB rotation then fails with `PermissionError: [WinError 32]` ("Logging error in Loguru
-Handler"). It is noise, not a test failure, and does not happen on the Linux host.
+log on through `GUNICORN_CMD_ARGS` anyway (`tests/test_gunicorn_access_log.py`).
+On Windows, parallel pytest workers share `app.log`, so a rotation can fail with
+`PermissionError: [WinError 32]` ("--- Logging error ---"). That is noise, not a test failure,
+and doesn't happen on the Linux host.
 
 ## The test suites
 

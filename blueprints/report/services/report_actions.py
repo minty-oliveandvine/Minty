@@ -21,7 +21,7 @@ keeps its entries, a new publish of that day adds a second copy, and Edit report
 """
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 PUBLISHING = "publishing"
 NEWER_REOPEN = "You can only edit the most recent report. Delete or edit the newer reports first."

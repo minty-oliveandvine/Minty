@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Mapping
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 # The entity-side module GATE -- who may use which module, and the writes that grant it.
 # Subscription reasoning (cards, the panel, notices, the access sweep) is

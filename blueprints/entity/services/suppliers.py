@@ -10,7 +10,7 @@ silently from the very line it was added for. The row is written now.
 from __future__ import annotations
 
 import requests
-from loguru import logger
+from services.app_runtime.log import logger
 
 XERO_CONTACTS = "https://api.xero.com/api.xro/2.0/Contacts"
 NOT_CONNECTED = "This entity isn't connected to Xero yet. Could you ask an admin to connect it?"

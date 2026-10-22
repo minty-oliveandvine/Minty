@@ -9,7 +9,7 @@ survive a re-save - the sync is idempotent.
 minty-onboarding-api's ``onboarding/services/cash_settings.py`` is the same rule for the
 wizard; change the two together.
 """
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import CashInfo, EntityCashSetting, db
 

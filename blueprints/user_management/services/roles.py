@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from flask import Response, jsonify
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import User, UserEntity
 from models.user_management import Roles

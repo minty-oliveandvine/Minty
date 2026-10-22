@@ -29,6 +29,8 @@ htmlcov/
 # the repo: a full pettycashv2 dump and the billing service logs.
 *.log
 *.log.zip
+# RotatingFileHandler's old files (services/app_runtime/legacy/bootstrap.py)
+*.log.[0-9]*
 *.sqlite
 
 # Flask instance folder: generated PDFs/DOCX of real reports, temp files.

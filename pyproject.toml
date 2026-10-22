@@ -7,7 +7,7 @@ name = "minty-ref"
 version = "0.1.0"
 description = "Petty cash management web application"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.13,<3.14"
 dependencies = [
   "Flask==2.3.3",
   "Flask-Bcrypt==1.0.1",
@@ -30,7 +30,7 @@ dependencies = [
   "email-validator==2.2.0",
   "google-genai==2.22.0",
   "gunicorn==23.0.0",
-  "loguru>=0.7.2",
+  "minty-shared @ git+https://github.com/minty-oliveandvine/minty-shared-py@v0.1",
   "lxml==6.0.1",
   "numpy==2.1.0",
   "openpyxl==3.1.5",

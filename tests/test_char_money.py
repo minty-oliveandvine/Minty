@@ -65,18 +65,20 @@ def exact(value) -> Decimal:
 # ---- the figures a day accumulates -------------------------------------------------------------
 
 
+# A dime and two dimes, not ten dimes: Python 3.12+'s sum() of floats is compensated, so ten 0.10s
+# now add to exactly 1.0 and hid the bug. 0.1 + 0.2 is 0.30000000000000004 however it is summed.
 @pytest.mark.xfail(strict=True, reason="the Petty Cash API's Close read sums the expense lines as floats "
-                                       "(blueprints/petty_cash_api/routes/close.py, expenses.total): 0.9999999999999999")
-def test_ten_dimes_of_expenses_are_exactly_one_dollar(shop, client):
+                                       "(blueprints/petty_cash_api/routes/close.py, expenses.total): 0.30000000000000004")
+def test_a_dime_and_two_dimes_of_expenses_are_exactly_thirty_cents(shop, client):
     owner, entity = shop
     F.login(client, owner)
     open_report(client, entity, DAY, opening="1000.00")
     post_sales(client, entity, DAY, cash="100")
-    post_expenses(client, entity, DAY, [(f"Item {i}", "0.10") for i in range(10)])
+    post_expenses(client, entity, DAY, [("Stamps", "0.10"), ("Envelope", "0.20")])
 
     totals = draft_totals(client, entity, DAY)
-    assert exact(totals["total_expenses"]) == Decimal("1.00")
-    assert exact(totals["closing_balance"]) == Decimal("1099.00")
+    assert exact(totals["total_expenses"]) == Decimal("0.30")
+    assert exact(totals["closing_balance"]) == Decimal("1099.70")
 
 
 def test_sales_of_a_dime_and_two_dimes_are_thirty_cents(shop, client):

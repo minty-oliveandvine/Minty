@@ -8,7 +8,7 @@ import os
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.shared.enums import SaleType

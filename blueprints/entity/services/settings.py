@@ -1,10 +1,11 @@
 """Entity settings and contact routes."""
 
 import threading
+from minty_shared import logctx
 from uuid import uuid4
 
 from flask import current_app
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -142,7 +143,8 @@ def _run_in_background(label, target, *args, entity_id, flask_app=None,
             except Exception as exc:
                 logger.error("%s failed entity=%s: %s", label, entity_id, exc)
 
-    kwargs = {"target": _run, "daemon": True}
+    # carry_context: the thread keeps the request's trace, user and entity on its lines.
+    kwargs = {"target": logctx.carry_context(_run), "daemon": True}
     if thread_name:
         kwargs["name"] = thread_name
     threading.Thread(**kwargs).start()

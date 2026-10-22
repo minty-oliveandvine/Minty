@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import bindparam, text
 
 from blueprints.shared.schema import SCHEMA

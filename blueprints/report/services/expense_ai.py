@@ -65,7 +65,7 @@ import time
 from collections import defaultdict, deque
 from decimal import Decimal, InvalidOperation
 
-from loguru import logger
+from services.app_runtime.log import logger
 from pydantic import BaseModel, Field, ValidationError
 
 from services.app_runtime.env import flag

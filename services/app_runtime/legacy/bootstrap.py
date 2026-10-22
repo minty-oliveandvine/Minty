@@ -7,8 +7,8 @@ This module centralizes legacy app construction and extension wiring so
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
-import sys
 import uuid
 from collections import defaultdict
 from typing import Any, cast
@@ -24,12 +24,12 @@ from services.app_runtime.mail import Mail
 from flask_migrate import Migrate
 from flask_session import Session
 from flask_wtf import CSRFProtect
-from loguru import logger
+from minty_shared.logctx import ContextFilter, MintyFormatter
 
-from logging_settings import LOG_FORMAT_FIXED_WIDTH, LOG_LEVEL_DEFAULT
 from models.db import db
 from pettycash.core.blueprint_loader import (register_blueprints,
                                              register_compat_alias)
+from pettycash.core import http_hardening
 from pettycash.core.hooks import init_app as init_hooks
 from blueprints.shared import entity_ref, preview_origin
 from blueprints.shared.schema import SCHEMA
@@ -42,81 +42,45 @@ load_dotenv()
 XERO_API_BASE_URL = "https://api.xero.com/api.xro/2.0"
 
 
-def _setup_file_logging() -> str:
-    log_file_path = os.path.join(os.path.dirname(__file__), "app.log")
-    if not os.path.exists(log_file_path):
-        open(log_file_path, "a", encoding="utf-8").close()
-    return os.path.abspath(log_file_path)
+#: app.log beside this file, rotated as loguru rotated it (5 MB), ten old files kept.
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.log")
+LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUPS = 10
+
+_logging_configured = False
 
 
 def _setup_logging() -> None:
-    logger.remove()
-    level = os.environ.get("LOG_LEVEL", LOG_LEVEL_DEFAULT).upper()
-    fixed_width_format = LOG_FORMAT_FIXED_WIDTH
+    """Every line - ours (the ``minty`` logger, ``services/app_runtime/log.py``) and werkzeug's,
+    xero_python's, urllib3's alike - reaches the root logger and is written to stderr and app.log
+    in the one format (``minty_shared.logctx``), with the request's trace, user, entity and step.
 
-    logger.add(
-        sys.stderr,
-        level=level,
-        format=fixed_width_format,
-        backtrace=True,
-        # Variable values in tracebacks carry tokens and secrets: development only.
-        diagnose=is_development(),
-        enqueue=True,
-    )
-
-    logger.add(
-        _setup_file_logging(),
-        level=level,
-        rotation="5 MB",
-        retention="10 days",
-        compression="zip",
-        encoding="utf-8",
-        format=fixed_width_format,
-        backtrace=True,
-        # Variable values in tracebacks carry tokens and secrets: development only.
-        diagnose=is_development(),
-        enqueue=True,
-    )
-
-
-def _intercept_standard_logging() -> None:
-    class _InterceptHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            try:
-                level = logger.level(record.levelname).name
-            except ValueError:
-                level = str(record.levelno)
-
-            frame, depth = logging.currentframe(), 2
-            while frame and frame.f_code.co_filename == logging.__file__:
-                frame = frame.f_back
-                depth += 1
-
-            logger.opt(depth=depth, exception=record.exc_info).log(
-                level, record.getMessage()
-            )
-
-    intercept_handler = _InterceptHandler()
-
+    Once per process, and by ADDING to the root logger: ``create_app`` runs many times under
+    pytest, and replacing the root's handlers would drop pytest's own mid-test. Tracebacks carry
+    no variable values (loguru's ``diagnose`` is gone), so nothing in a frame reaches the log.
+    """
+    global _logging_configured
+    if _logging_configured:
+        return
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
     root_logger = logging.getLogger()
-    root_logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
-    root_logger.handlers = [intercept_handler]
-
-    for logger_name in [
-        "werkzeug",
-        "requests_oauthlib",
-        "xero_python",
-        "urllib3",
-    ]:
-        logging.getLogger(logger_name).handlers = [intercept_handler]
-        logging.getLogger(logger_name).propagate = False
-
+    for handler in (
+        logging.StreamHandler(),
+        logging.handlers.RotatingFileHandler(
+            LOG_FILE, maxBytes=LOG_FILE_MAX_BYTES, backupCount=LOG_FILE_BACKUPS,
+            encoding="utf-8", delay=True,
+        ),
+    ):
+        handler.setFormatter(MintyFormatter())
+        handler.addFilter(ContextFilter())
+        root_logger.addHandler(handler)
+    root_logger.setLevel(level)
     logging.captureWarnings(True)
+    _logging_configured = True
 
 
 def _setup_legacy_logging(application: Flask) -> None:
     _setup_logging()
-    _intercept_standard_logging()
     application.logger.handlers = []
     application.logger.propagate = True
     application.logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
@@ -142,6 +106,8 @@ def create_app():
     # redirect, the Terms gate and login_required send the person anywhere.
     preview_origin_regex()
     app.before_request(preview_origin.capture)
+    # Next, the request's trace (minty_shared.logctx): before every hook that logs or binds.
+    app.before_request(http_hardening.open_trace)
     register_blueprints(app)
     # Old page addresses, each a 308 to its new one (blueprints/shared/legacy_addresses.py).
     from blueprints.shared.legacy_addresses import legacy_bp

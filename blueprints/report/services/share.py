@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app, request, url_for
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.shared.entity_display import build_entity_acronym
 from models.db import Entity, Report, ShareLink, UserEntity, db

@@ -27,7 +27,7 @@ no answer.
 from __future__ import annotations
 
 from flask import request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.legal import legal_bp
 from blueprints.legal.models.terms_consent import SOURCE_HUB

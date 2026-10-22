@@ -9,7 +9,7 @@ checks mirror ``blueprints/invitation/routes/api.py``.
 from __future__ import annotations
 
 from blueprints.invitation.models.invitation import Invitation
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.invitation.services.invite import (_is_invitation_expired,
                                                    cancel_invitation,

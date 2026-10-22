@@ -10,7 +10,7 @@ failure, and the app only re-authenticates on a 401 it can see.
 from __future__ import annotations
 
 from flask import g, jsonify, make_response
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.exceptions import HTTPException
 
 from blueprints.petty_cash_api import petty_cash_api_bp

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 

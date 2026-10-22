@@ -9,7 +9,7 @@ than trusting anything from the incoming payload (only entity_id from URL).
 from __future__ import annotations
 
 from flask import jsonify, request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity import entity_bp
 from blueprints.entity.services.settings import (

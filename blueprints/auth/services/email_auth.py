@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 from flask_mail import Message
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from blueprints.auth.models.email_otp import EmailOtp

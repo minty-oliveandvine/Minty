@@ -12,7 +12,7 @@ forged), so what a redirect flashed on its way to /entity is still said.
 from __future__ import annotations
 
 from flask import request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity import entity_bp
 from blueprints.entity.services.entity_list import build_entity_list, read_notices

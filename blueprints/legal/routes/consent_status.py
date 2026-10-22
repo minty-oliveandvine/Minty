@@ -16,7 +16,7 @@ Neither requires a login, and neither writes anything. Recording an acceptance i
 """
 
 from flask import jsonify, request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.legal import legal_bp
 from legal import registry

@@ -31,7 +31,7 @@ up itself.
 from __future__ import annotations
 
 from flask import has_request_context, request
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.legal.models.terms_consent import CONSENT_SOURCES, TermsConsent

@@ -15,7 +15,7 @@ at Xero may already have gone through, so the two sides can disagree.
 from __future__ import annotations
 
 import requests
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity.services.settings import invalidate_entity_xero_cache
 from models.db import Entity, User, db

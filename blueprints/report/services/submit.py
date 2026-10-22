@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.orm import lazyload
 from sqlalchemy.orm.attributes import flag_modified
 

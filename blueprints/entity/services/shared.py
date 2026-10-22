@@ -3,7 +3,7 @@
 # display_deposit_balance, get_main_bank_account.
 
 from flask import url_for
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity.services.cash_settings import sync_cash_settings
 from blueprints.xero.services.settings import \

@@ -1,7 +1,7 @@
 """Shared Xero account/contact lists and mapping defaults for classic templates."""
 
 from flask import g
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import AccountInfo, EntityPettycashSettings, XeroContactSync
 from services.app_runtime.legacy.xero_service import (

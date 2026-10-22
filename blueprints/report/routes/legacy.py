@@ -2,7 +2,7 @@ from datetime import datetime
 
 from flask import redirect
 from flask.typing import ResponseReturnValue
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import safe_float

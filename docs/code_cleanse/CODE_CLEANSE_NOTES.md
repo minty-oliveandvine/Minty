@@ -391,6 +391,29 @@ Same call as xero/entity — `routes/api.py` (2025) and `services/ending.py`
 
 `ruff --select F` clean across all blueprints. No new test failures at any step.
 
+## Logging: one line format across every backend (2026-10-22)
+
+All five Python backends (Flask and the four Django APIs) now write the same line through stdlib
+`logging`, from `minty-shared-py` (`minty_shared.logctx`):
+
+```
+<UTC ISO, ms>Z LEVEL [trace=a1b2c3d4] [user=<uuid>|entity=<uuid>|step=payment.approve] message
+```
+
+Rules for code from now on:
+- Log through the service's logger: Flask `from services.app_runtime.log import logger`, each
+  Django API its named `logging.getLogger("<service>")`. **Never loguru** (`tests/test_zz_no_loguru.py`).
+- Don't put ids the context already carries into the message: the user, entity and trace are on
+  the line. A row id (`bill=…`, `link=…`) still belongs in the message.
+- Name a unit of work with `with logctx.log_step("area.action"):` (or `@logctx.log_step(...)`)
+  when one request does more than its route name says. The route name is the fallback.
+- Bind user and entity only where they are **verified** (`logctx.bind`), never from a raw header.
+- Start a thread with `threading.Thread(target=logctx.carry_context(fn))`, or it loses the trace.
+- Send `logctx.outgoing_headers()` on calls to another Minty backend, never to Xero or Stripe.
+- Message text stays byte-identical through refactors (the rule above). Only the prefix changed.
+
+---
+
 ## Remaining known debt (NOT addressed — deliberate)
 - **The 79-test red baseline.** Chiefly `test_invitation.py` (31) failing on
   `Entity(currency_code=...)` fixture drift — the model dropped that field.

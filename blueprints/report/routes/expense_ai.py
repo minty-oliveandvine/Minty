@@ -10,7 +10,7 @@ shows nothing - unavailable means invisible (Stage 1 §7.4, §9.3).
 """
 
 from flask import jsonify, request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services import expense_ai

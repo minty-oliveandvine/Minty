@@ -347,11 +347,10 @@ def client(app):
 
 @pytest.fixture
 def caplog(caplog):
-    """pytest's ``caplog``, also fed by loguru - which the services log through, and which
-    pytest does not see on its own. With it a test asserts on what the engine logged the
-    same way in both engines (``minty-billing-api`` logs through stdlib ``logging``)."""
-    from loguru import logger
+    """pytest's ``caplog`` at every level. The services log through the stdlib ``minty`` logger
+    (``services/app_runtime/log.py``), which pytest sees on its own; DEBUG is opened because the
+    loguru bridge this replaced fed caplog every level, and tests assert on debug lines."""
+    import logging
 
-    handler_id = logger.add(caplog.handler, format="{message}", level=0)
+    caplog.set_level(logging.DEBUG)
     yield caplog
-    logger.remove(handler_id)

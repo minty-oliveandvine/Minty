@@ -40,7 +40,7 @@ outcome, and the ERROR log is what makes the alternative visible.
 
 from flask import jsonify, redirect, request, url_for
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.legal import legal_bp
 from blueprints.legal.services.consent import has_consent

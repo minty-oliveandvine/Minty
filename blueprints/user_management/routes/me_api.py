@@ -15,7 +15,7 @@ request can name anyone else. A refusal (``services.profile.ProfileError``) come
 from __future__ import annotations
 
 from flask import request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.shared import hub_api
 from blueprints.user_management import user_management_bp

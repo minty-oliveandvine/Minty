@@ -8,7 +8,7 @@ captured here — the user completes those later on the full Settings page.
 
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity.services.settings import (
     COA_INCLUDED_TYPES, saveable_account_codes,

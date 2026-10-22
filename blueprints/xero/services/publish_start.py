@@ -15,8 +15,9 @@ the report id from the address, so publishing the latest report left it stuck).
 from __future__ import annotations
 
 import threading
+from minty_shared import logctx
 
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.exc import OperationalError
 
 from blueprints.shared.enums import PublishStatus
@@ -145,7 +146,7 @@ def start_publish(entity_id, report_id, user, app):
         logger.info(f"Starting Xero integration for report {report.id}, entity {entity_id} "
                     f"(using token from user: {owner.username})")
         threading.Thread(
-            target=process_xero_integration_background,
+            target=logctx.carry_context(process_xero_integration_background),
             args=(entity_id, report.transaction_date, report.id, owner.username, token, app, prior_status),
             daemon=True,
         ).start()
