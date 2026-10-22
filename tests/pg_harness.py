@@ -58,9 +58,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _load_env_module():
     """``services/app_runtime/env.py``, loaded BY PATH rather than as ``services.app_runtime``.
 
-    The three Django APIs load this harness from their own conftest without Minty on
-    ``sys.path`` - and putting it there would let Minty's ``config.py`` / ``services`` shadow
-    their own modules. ``env.py`` is stdlib-only by design, so the one file is all we need.
+    The four Django APIs load this harness (through ``minty_shared.testing.pg``) without Minty
+    on ``sys.path`` - and putting it there would let Minty's ``config.py`` / ``services`` shadow
+    their own modules. ``env.py`` imports nothing from the app (only ``minty_shared.config``,
+    which every API installs too), so the one file is all we need.
     Registered in ``sys.modules`` so its dataclasses resolve their annotations.
     """
     name = "minty_pg_harness_env"

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import jwt
 from flask import current_app, request
-from minty_shared import logctx
+from minty_shared import logctx, tokens
 
 from services.app_runtime.env import url_env
 
@@ -104,10 +104,9 @@ def claims_from_bearer() -> dict | None:
     if not header.startswith("Bearer "):
         return None
     try:
-        claims = jwt.decode(
-            header[len("Bearer "):].strip(),
-            current_app.config.get("SECRET_KEY"),
-            algorithms=["HS256"],
+        # HS256 with the 60 s clock skew every Minty backend allows (minty_shared.tokens).
+        claims = tokens.decode_bearer(
+            header[len("Bearer "):].strip(), current_app.config.get("SECRET_KEY")
         )
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
         return None
