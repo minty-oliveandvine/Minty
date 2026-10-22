@@ -827,7 +827,7 @@ requires-dist = [
     { name = "google-genai", specifier = "==2.22.0" },
     { name = "gunicorn", specifier = "==23.0.0" },
     { name = "lxml", specifier = "==6.0.1" },
-    { name = "minty-shared", git = "https://github.com/minty-oliveandvine/minty-shared-py?rev=v0.1" },
+    { name = "minty-shared", url = "https://github.com/minty-oliveandvine/minty-shared-py/archive/refs/tags/v0.1.tar.gz" },
     { name = "numpy", specifier = "==2.1.0" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "phonenumbers", specifier = "==9.0.10" },
@@ -864,7 +864,16 @@ dev = [
 [[package]]
 name = "minty-shared"
 version = "0.1.0"
-source = { git = "https://github.com/minty-oliveandvine/minty-shared-py?rev=v0.1#6b7fccce41904725ef1f1bbd8c0e80b6f667d634" }
+source = { url = "https://github.com/minty-oliveandvine/minty-shared-py/archive/refs/tags/v0.1.tar.gz" }
+sdist = { hash = "sha256:350375e1a6be980e9c0124ac89bfb57b50d643f5fc2d4e6d07535fc3c80fdc5a" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.380" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "msgspec"
