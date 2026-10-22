@@ -71,7 +71,7 @@ def test_a_refusal_from_the_correction_is_the_apis_refusal(app, client, shop, de
 
 @pytest.mark.parametrize("assertion", [
     {"scope": "xero-access-token"},  # the token route's scope is not this route's
-    {"seconds": -5},
+    {"seconds": -120},  # past the 60 s clock skew every backend allows
     {"secret": "not-the-key-flask-and-the-django-service-share"},
     {"drop": ("user_id",)},
     {"drop": ("entity_id",)},

@@ -12,7 +12,7 @@ from flask import (flash, g, get_flashed_messages, jsonify, redirect, request,
                    session, url_for)
 from flask.typing import ResponseReturnValue
 from flask_login import current_user, login_required, login_user
-from minty_shared import logctx
+from minty_shared import logctx, tokens
 from services.app_runtime.log import logger
 from sqlalchemy import desc
 
@@ -1508,10 +1508,10 @@ def _authenticate_internal_caller(scope=_INTERNAL_TOKEN_SCOPE, extra_claims=()):
         return None, "SECRET_KEY not configured"
 
     try:
-        claims = pyjwt.decode(
+        # A backend's own 60 s assertion, with every backend's clock skew (minty_shared.tokens).
+        claims = tokens.decode_bearer(
             header[7:].strip(),
             secret,
-            algorithms=["HS256"],
             options={"require": ["exp", "scope", "entity_id", *extra_claims]},
         )
     except pyjwt.ExpiredSignatureError:
