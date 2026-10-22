@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 from flask import current_app, request, url_for
 from flask_mail import Message
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.invitation.models.invitation import Invitation
 from models.db import Entity, User, UserEntity, db, tz

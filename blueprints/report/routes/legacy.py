@@ -4,7 +4,7 @@ from typing import Any
 from flask import flash, jsonify, redirect, request, url_for
 from flask.typing import ResponseReturnValue
 from flask_login import login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import safe_float

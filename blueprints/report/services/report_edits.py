@@ -15,7 +15,7 @@ commit.
 """
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 MAX_REASON = 300
 MAX_REMARKS = 300

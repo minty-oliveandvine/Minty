@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from flask import current_app, flash, redirect, render_template, url_for
 from flask_login import current_user
 from flask_mail import Message
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import func, or_
 from werkzeug.security import generate_password_hash
 

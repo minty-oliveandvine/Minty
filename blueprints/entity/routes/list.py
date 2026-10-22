@@ -5,7 +5,7 @@ from datetime import datetime
 from flask import (current_app, flash, get_flashed_messages, redirect,
                    render_template, request, session, url_for)
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import minty_web_module_page_handoff, petty_cash_web_handoff_url

@@ -3,6 +3,7 @@
 # moved from app.
 import os
 import threading
+from minty_shared import logctx
 import time
 from datetime import datetime
 from typing import cast
@@ -11,7 +12,7 @@ from docxtpl import DocxTemplate
 from flask import current_app as app
 from flask import jsonify, request, send_file, url_for
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 from user_agents import parse
 
 from blueprints.report import report_bp
@@ -330,10 +331,10 @@ def generate_pdf_report(id):
                         logger.error(f"Failed to delete screenshot file: {ex}")
 
                 threading.Thread(
-                    target=delete_file_later, args=(pdf_path,), daemon=True
+                    target=logctx.carry_context(delete_file_later), args=(pdf_path,), daemon=True
                 ).start()
                 threading.Thread(
-                    target=delete_file_later, args=(docx_path,), daemon=True
+                    target=logctx.carry_context(delete_file_later), args=(docx_path,), daemon=True
                 ).start()
                 return send_file(
                     pdf_path,
@@ -448,7 +449,7 @@ def report_screenshot(id=None):
                 logger.error(f"Failed to delete screenshot file: {ex}")
 
         threading.Thread(
-            target=delete_file_later, args=(filepath,), daemon=True
+            target=logctx.carry_context(delete_file_later), args=(filepath,), daemon=True
         ).start()
         logger.info(f"Screenshot saved for {browser_name}")
         return send_file(

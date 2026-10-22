@@ -12,7 +12,7 @@ from flask import (current_app, flash, jsonify, make_response, redirect,
                    render_template, request, url_for)
 from flask_login import current_user, login_required
 from iso4217 import Currency
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity import entity_bp
 from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email

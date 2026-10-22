@@ -9,7 +9,7 @@ from datetime import datetime
 
 from flask import jsonify, request, url_for
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.utils import secure_filename
 
 from blueprints.report import report_bp

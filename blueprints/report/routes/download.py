@@ -13,7 +13,7 @@ import pandas as pd
 from flask import (jsonify, make_response, redirect, render_template, request,
                    send_file)
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services import report_csv

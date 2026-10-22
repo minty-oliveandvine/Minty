@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from flask import request, url_for
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.shared import bearer_api
 from blueprints.user_management.services import profile

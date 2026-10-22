@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 import requests
 from flask import current_app
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.shared.sidebar import subscription_api_origin
 

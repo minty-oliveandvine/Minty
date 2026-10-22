@@ -1,7 +1,7 @@
 from flask import current_app, flash, jsonify, redirect, request, url_for
 from flask_login import login_user
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.auth import auth_bp
 from blueprints.auth.services.identity import resolve_user_by_email

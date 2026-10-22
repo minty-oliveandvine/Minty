@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from flask import (current_app, flash, get_flashed_messages, jsonify, redirect,
                    render_template, request, url_for)
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.entity import entity_bp

@@ -8,7 +8,7 @@ import pandas as pd
 from flask import (flash, jsonify, make_response, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.report import report_bp

@@ -1,7 +1,7 @@
 # Token endpoints: mytoken, event_id, check_token, refresh_token.
 from flask import flash, jsonify
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.auth import auth_bp
 from services.auth.token_service import ensure_valid_token

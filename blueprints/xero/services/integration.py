@@ -6,7 +6,7 @@ import pytz
 import requests
 from flask import current_app as app
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import AccountInfo, XeroContactSync
 from services.auth.token_service import ensure_valid_token

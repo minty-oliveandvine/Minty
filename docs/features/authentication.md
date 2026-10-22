@@ -183,7 +183,7 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
   the query string dropped and secret path segments shown as `[redacted]`. The Datadog
   browser logs send `origin + path` only (`static/js/datadog-logs.js`, also scrubbing the
   SDK's own `view.url`/`view.referrer`), and a share-link path as `/Minty_Report/[redacted]`.
-  Loguru's `diagnose` (variable values in tracebacks) is on in development only, and the Xero
+  Tracebacks carry no variable values (loguru and its `diagnose` were dropped 2026-10-22), and the Xero
   token refresh no longer logs its Basic `Authorization` header.
 - **No state change by GET**: publishing to Xero, disconnecting Xero (a CSRF-checked form
   POST since 2026-10-05) and the invite Terms check (`POST`, the token in the body) all refuse

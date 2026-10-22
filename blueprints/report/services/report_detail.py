@@ -10,7 +10,7 @@ from flask import current_app as app
 from flask import (jsonify, make_response, redirect, render_template, request,
                    send_file)
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
 from blueprints.report.services.shared import split_receipt_keys

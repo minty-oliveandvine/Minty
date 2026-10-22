@@ -16,6 +16,12 @@ instead of calling into `.github`, deliberately:
   same judgement the modernisation plan already makes for `py-package.yml`, deferred until
   `minty-db` / `minty-shared-py` exist.
 
+`minty-shared-py` (2026-10-22, public, immutable `vX.Y` tags) makes the same call for Python: its
+own `ci.yml` runs Python 3.13, `pip install -e .[dev]`, then `ruff check`, `ruff format --check`,
+`pyright` (strict) and `pytest`. `py-package.yml` arrives with a second Python package
+(`minty-db`). Its five consumers (Minty and the four APIs) install it from the tag over HTTPS,
+which works with no key only because the repo is public.
+
 It runs checkout -> Node 24 (what `next-web.yml` defaults to, and what Vercel builds the consumers
 with) -> `npm ci` -> `typecheck` -> `lint` -> `test`. **The day a second TypeScript package
 exists, this becomes `ts-package.yml` in `.github` and both call it.**

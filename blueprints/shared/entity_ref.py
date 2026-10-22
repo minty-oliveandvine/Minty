@@ -28,7 +28,7 @@ import unicodedata
 import uuid as uuid_mod
 
 from flask import g, has_app_context, request
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.routing import BaseConverter, RequestRedirect
 
 SHORT_ID_LENGTH = 8

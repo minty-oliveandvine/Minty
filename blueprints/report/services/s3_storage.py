@@ -12,7 +12,7 @@ from botocore.exceptions import (ClientError, NoCredentialsError,
 from dateutil import parser
 from flask import current_app as app
 from flask import g
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.utils import secure_filename
 
 from blueprints.report.services.file_downsize import downsize_bytes

@@ -21,7 +21,7 @@ of the entity.
 from __future__ import annotations
 
 import requests
-from loguru import logger
+from services.app_runtime.log import logger
 
 
 from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,

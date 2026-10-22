@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.expense_ai import is_enabled as expense_ai_is_enabled

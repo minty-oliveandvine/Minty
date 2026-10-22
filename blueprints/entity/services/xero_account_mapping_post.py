@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Optional
 
 from flask import flash, jsonify, redirect, request, url_for
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.entity.services.cash_settings import sync_cash_settings

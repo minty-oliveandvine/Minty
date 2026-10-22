@@ -47,7 +47,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from flask import current_app
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import and_, case, func
 from sqlalchemy import inspect as sa_inspect
 

@@ -28,6 +28,7 @@ import os
 
 import jwt
 from flask import current_app, request
+from minty_shared import logctx
 
 from services.app_runtime.env import url_env
 
@@ -111,13 +112,17 @@ def claims_from_bearer() -> dict | None:
     if not header.startswith("Bearer "):
         return None
     try:
-        return jwt.decode(
+        claims = jwt.decode(
             header[len("Bearer "):].strip(),
             current_app.config.get("SECRET_KEY"),
             algorithms=["HS256"],
         )
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
         return None
+    # A token we signed names the person; its entity claim is not an authorised scope yet,
+    # so only the user goes on the log line here.
+    logctx.bind(user=claims.get("user_id"))
+    return claims
 
 
 def user_id_from_bearer() -> str | None:

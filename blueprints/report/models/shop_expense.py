@@ -24,7 +24,7 @@ import mimetypes
 import os
 from uuid import uuid4
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.shared.column_types import MintyUuid, Money, pg_enum
 from blueprints.report.services.receipt_keys import split_receipt_keys

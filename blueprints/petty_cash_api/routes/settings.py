@@ -124,7 +124,7 @@ def settings_page():
 def save_country():
     from blueprints.entity.services.country_currency import checked_country_currency
     from blueprints.entity.services.xero_account_mapping_post import apply_country_currency_selection
-    from loguru import logger
+    from services.app_runtime.log import logger
     from models.db import Entity, db
 
     if not _may(*COUNTRY_RIGHTS):
@@ -265,7 +265,7 @@ def xero_settings_answer(entity_id, person, action, body) -> tuple[dict, int]:
     shared with the internal route minty-petty-cash-api forwards them to
     (``xero/routes/routes.py::internal_xero_settings``): each asks Xero."""
     from flask import current_app
-    from loguru import logger
+    from services.app_runtime.log import logger
 
     from blueprints.entity.services import xero_mapping
     from blueprints.entity.services.xero_account_mapping_post import save_mapping

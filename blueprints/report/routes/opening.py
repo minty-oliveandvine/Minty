@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from flask import flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report import report_bp

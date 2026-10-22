@@ -18,7 +18,7 @@ surfacing, which is precisely what §9 rules out.
 
 from flask import jsonify, request
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services import expense_ai

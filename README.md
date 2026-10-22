@@ -103,7 +103,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.ym
 
 ## Running without Docker
 
-Requires **Python 3.11.9** and a PostgreSQL you can point at.
+Requires **Python 3.13** and a PostgreSQL you can point at.
 
 ```bash
 git clone https://github.com/minty-oliveandvine/Minty.git

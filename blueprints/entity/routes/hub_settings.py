@@ -27,7 +27,7 @@ from __future__ import annotations
 import uuid
 
 from flask import request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity import entity_bp
 from blueprints.entity.services.entity_list import read_notices

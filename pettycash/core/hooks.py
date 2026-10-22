@@ -9,7 +9,7 @@ from flask import (flash, has_request_context, jsonify, redirect,
                    url_for)
 from flask_login import current_user, user_logged_in, user_logged_out
 from flask_wtf.csrf import CSRFError
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.exceptions import HTTPException
 
 from blueprints.shared import preview_origin

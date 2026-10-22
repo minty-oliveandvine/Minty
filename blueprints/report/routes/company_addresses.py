@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from flask import abort, redirect, request, url_for
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 

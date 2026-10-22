@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from flask import jsonify, render_template, request
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.user_management import user_management_bp
 from blueprints.user_management.services.access_guards import require_superuser

@@ -10,7 +10,7 @@ persist the user's selection back onto ``is_active``.
 
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import bindparam, text
 
 from blueprints.entity.services.settings import sync_xero_coa_bill

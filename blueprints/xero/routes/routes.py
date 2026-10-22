@@ -12,7 +12,8 @@ from flask import (flash, g, get_flashed_messages, jsonify, redirect, request,
                    session, url_for)
 from flask.typing import ResponseReturnValue
 from flask_login import current_user, login_required, login_user
-from loguru import logger
+from minty_shared import logctx
+from services.app_runtime.log import logger
 from sqlalchemy import desc
 
 from blueprints.entity.services.settings import (
@@ -1160,7 +1161,7 @@ def xero_callback():
                                 try:
                                     _app = current_app._get_current_object()
                                     sync_thread = threading.Thread(
-                                        target=sync_all_accounts_and_contacts_background,
+                                        target=logctx.carry_context(sync_all_accounts_and_contacts_background),
                                         args=(
                                             str(entity.id),
                                             response.get("access_token"),
@@ -1426,7 +1427,7 @@ def xero_callback():
                                 try:
                                     _app = current_app._get_current_object()
                                     sync_thread = threading.Thread(
-                                        target=sync_all_accounts_and_contacts_background, args=(
+                                        target=logctx.carry_context(sync_all_accounts_and_contacts_background), args=(
                                             entity_id, response.get("access_token"), tenant_id, user.id, _app, ), daemon=True, )
                                     sync_thread.start()
                                     time.sleep(0.2)
@@ -1520,6 +1521,9 @@ def _authenticate_internal_caller(scope=_INTERNAL_TOKEN_SCOPE, extra_claims=()):
 
     if claims.get("scope") != scope:
         return None, "wrong scope"
+    # A Minty backend's own assertion, scoped to this route: its company (and person, when it
+    # names one) go on the log line, with the caller's trace (X-Request-ID).
+    logctx.bind(user=claims.get("user_id"), entity=claims["entity_id"])
     return claims, None
 
 

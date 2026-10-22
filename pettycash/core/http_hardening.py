@@ -15,6 +15,11 @@ request line in full - query-string tokens and path secrets included. This one
 prints the path only, with the secret segments blanked. Render switches gunicorn's
 back on through ``GUNICORN_CMD_ARGS``, so ``gunicorn.conf.py`` gives gunicorn a
 logger that writes no access line (``services/app_runtime/gunicorn_logging.py``).
+
+Every request also opens a trace (``minty_shared.logctx``): an incoming ``X-Request-ID`` is
+kept when well formed (the Django APIs send theirs), echoed on the response, and carried by
+every line written meanwhile, with the route as the fallback step. The sign-in layers add the
+user and entity (``blueprints/shared/bearer_api.py``, ``blueprints/petty_cash_api/guard.py``).
 """
 
 from __future__ import annotations
@@ -22,7 +27,8 @@ from __future__ import annotations
 import time
 
 from flask import Flask, g, request
-from loguru import logger
+from minty_shared import logctx
+from services.app_runtime.log import logger
 
 from services.app_runtime.env import is_development
 
@@ -45,12 +51,22 @@ def loggable_path() -> str:
     return path
 
 
+def open_trace() -> None:
+    """``before_request``: start the access line's clock and the request's trace. Registered by
+    the bootstrap straight after ``preview_origin.capture`` (which neither logs nor binds), so it
+    precedes every hook that does - one opened later would miss their lines and wipe the user
+    the sign-in hooks bind."""
+    g._request_started = time.perf_counter()
+    g._trace = logctx.start_trace(request.headers.get(logctx.TRACE_HEADER))
+    logctx.set_default_step(request.endpoint)
+
+
 def init_app(app: Flask) -> None:
     hsts = not is_development()
 
-    @app.before_request
-    def _stamp_request_start():
-        g._request_started = time.perf_counter()
+    @app.teardown_request
+    def _end_trace(_exc):
+        logctx.reset()
 
     @app.after_request
     def _harden_response(response):
@@ -62,6 +78,9 @@ def init_app(app: Flask) -> None:
             headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         if _secret_values():
             headers["Cache-Control"] = "no-store"
+        trace = g.get("_trace")
+        if trace:
+            headers[logctx.TRACE_HEADER] = trace
 
         if request.endpoint != "static":
             started = g.pop("_request_started", None)

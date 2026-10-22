@@ -27,7 +27,7 @@ from __future__ import annotations
 import os
 
 from flask import make_response, request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.petty_cash_api import petty_cash_api_bp
 from blueprints.petty_cash_api.api import company, refuse, respond, user

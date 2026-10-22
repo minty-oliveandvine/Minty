@@ -3,7 +3,7 @@
 import os
 
 from flask import current_app
-from loguru import logger
+from services.app_runtime.log import logger
 
 
 def convert_docx_to_pdf(docx_path, pdf_path):

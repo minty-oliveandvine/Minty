@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report.services.cash_denominations import (

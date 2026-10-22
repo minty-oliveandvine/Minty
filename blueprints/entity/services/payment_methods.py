@@ -10,7 +10,7 @@ accepted on input (``SaleType.normalize``) and the enum's words are what comes b
 
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.shared.enums import SaleType
 from models.db import EntitySaleSetting, SaleInfo, UserEntity, db

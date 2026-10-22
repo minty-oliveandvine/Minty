@@ -18,7 +18,7 @@ leaves the bucket after the commit (it was left behind, its ``attachment`` row o
 """
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 
 class ExpenseRefused(Exception):

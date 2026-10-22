@@ -31,7 +31,7 @@ modules hold a single object each.
 import json
 from datetime import datetime, timezone
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import XeroReportSync, db
 
