@@ -771,7 +771,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "gunicorn" },
     { name = "lxml" },
-    { name = "minty-shared" },
+    { name = "minty-shared", extra = ["jwt"] },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "phonenumbers" },
@@ -827,7 +827,7 @@ requires-dist = [
     { name = "google-genai", specifier = "==2.22.0" },
     { name = "gunicorn", specifier = "==23.0.0" },
     { name = "lxml", specifier = "==6.0.1" },
-    { name = "minty-shared", url = "https://github.com/minty-oliveandvine/minty-shared-py/archive/refs/tags/v0.1.tar.gz" },
+    { name = "minty-shared", extras = ["jwt"], url = "https://github.com/minty-oliveandvine/minty-shared-py/archive/refs/tags/v0.2.tar.gz" },
     { name = "numpy", specifier = "==2.1.0" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "phonenumbers", specifier = "==9.0.10" },
@@ -863,17 +863,33 @@ dev = [
 
 [[package]]
 name = "minty-shared"
-version = "0.1.0"
-source = { url = "https://github.com/minty-oliveandvine/minty-shared-py/archive/refs/tags/v0.1.tar.gz" }
-sdist = { hash = "sha256:350375e1a6be980e9c0124ac89bfb57b50d643f5fc2d4e6d07535fc3c80fdc5a" }
+version = "0.2.0"
+source = { url = "https://github.com/minty-oliveandvine/minty-shared-py/archive/refs/tags/v0.2.tar.gz" }
+dependencies = [
+    { name = "tzdata" },
+]
+sdist = { hash = "sha256:799cd9eefd967a424acc07806299bc10de4ecbb35d5ef34e5a05a6a066099982" }
+
+[package.optional-dependencies]
+jwt = [
+    { name = "pyjwt" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "django", marker = "extra == 'django'", specifier = ">=5.2,<6.0" },
+    { name = "django-ninja", marker = "extra == 'django'", specifier = ">=1.3,<2.0" },
+    { name = "minty-shared", extras = ["jwt", "django", "testing"], marker = "extra == 'dev'" },
+    { name = "pyjwt", marker = "extra == 'jwt'", specifier = ">=2.8,<3.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.380" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8" },
+    { name = "pytest-django", marker = "extra == 'testing'", specifier = ">=4.8" },
+    { name = "requests", marker = "extra == 'django'", specifier = ">=2.28,<3.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "tzdata", specifier = ">=2024.1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["jwt", "django", "testing", "dev"]
 
 [[package]]
 name = "msgspec"
@@ -1405,6 +1421,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz", hash = "sha256:8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7", size = 200404, upload-time = "2026-10-03T09:23:14.143Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10e7ed03ab25e006cd741092b718/tzdata-2026.5-py2.py3-none-any.whl", hash = "sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac", size = 347996, upload-time = "2026-10-03T09:23:12.535Z" },
 ]
 
 [[package]]
