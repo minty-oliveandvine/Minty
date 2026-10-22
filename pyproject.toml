@@ -93,6 +93,11 @@ dev = [
   "autoflake>=2.3.3",
 ]
 
+[tool.hatch.metadata]
+# minty-shared is pinned by git tag (git+https://...@vX.Y), a direct reference hatchling refuses
+# without this - and `uv run` in CI builds the project before ruff runs.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = [
   "pettycash",
