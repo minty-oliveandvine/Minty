@@ -22,7 +22,7 @@ v3 cutover with only its FK targets changing.
 
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import (CashInfo, CountryInfo, Entity, EntityCashSetting, ReportCashCount, db)
 

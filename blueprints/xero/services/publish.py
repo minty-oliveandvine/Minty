@@ -11,7 +11,7 @@ import requests
 
 from flask import jsonify, current_app
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report.services.shared import update_report_after_deposit_change
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client

@@ -21,7 +21,7 @@ transient DB hiccup never locks users out of an otherwise-permitted route.
 from __future__ import annotations
 
 from flask import request
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.report import report_bp
 

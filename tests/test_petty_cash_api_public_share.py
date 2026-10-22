@@ -11,6 +11,7 @@ secret never reaches the log. Flask's page and this route open a link through th
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import char_factories as F
@@ -221,9 +222,35 @@ def test_an_expired_link_is_410_and_removed(app, db, shared):  # noqa: F811
     assert _read(app, body["path"]).status_code == 404
 
 
-def test_a_failure_is_a_generic_500_and_the_secret_never_reaches_the_log(app, shared, monkeypatch):
-    from loguru import logger
+@contextmanager
+def _log_lines():
+    """Every line the ``minty`` logger writes meanwhile, formatted as the log files hold it
+    (traceback included)."""
+    import logging
 
+    from minty_shared.logctx import ContextFilter, MintyFormatter
+
+    lines = []
+
+    class _Lines(logging.Handler):
+        def emit(self, record):
+            lines.append(self.format(record))
+
+    handler = _Lines(logging.DEBUG)
+    handler.setFormatter(MintyFormatter())
+    handler.addFilter(ContextFilter())
+    minty = logging.getLogger("minty")
+    level = minty.level
+    minty.addHandler(handler)
+    minty.setLevel(logging.DEBUG)
+    try:
+        yield lines
+    finally:
+        minty.removeHandler(handler)
+        minty.setLevel(level)
+
+
+def test_a_failure_is_a_generic_500_and_the_secret_never_reaches_the_log(app, shared, monkeypatch):
     import blueprints.petty_cash_api.routes.public_share as public_share
 
     path = shared[3]["path"]
@@ -233,12 +260,8 @@ def test_a_failure_is_a_generic_500_and_the_secret_never_reaches_the_log(app, sh
         raise RuntimeError(f"database fell over near {secret}")
 
     monkeypatch.setattr(public_share, "shared_payload", boom)
-    lines = []
-    sink = logger.add(lines.append, level="DEBUG")
-    try:
+    with _log_lines() as lines:
         resp = _read(app, path)
-    finally:
-        logger.remove(sink)
 
     assert resp.status_code == 500
     assert resp.get_json() == {"error": "Something went wrong on our side. Please try again."}
@@ -248,17 +271,11 @@ def test_a_failure_is_a_generic_500_and_the_secret_never_reaches_the_log(app, sh
 
 
 def test_opening_a_link_logs_its_row_never_its_secret(app, shared):
-    from loguru import logger
-
     _owner, entity, _report, body = shared
     secret = body["path"].rsplit("/", 1)[1]
-    lines = []
-    sink = logger.add(lines.append, level="DEBUG")
-    try:
+    with _log_lines() as lines:
         assert _read(app, body["path"]).status_code == 200
         assert _read(app, body["path"].rsplit("/", 1)[0] + "/" + "C" * 32).status_code == 404
-    finally:
-        logger.remove(sink)
 
     assert any(f"link={_link(app, entity.id).id}" in str(line) for line in lines)
     assert not [line for line in lines if secret in str(line) or "C" * 32 in str(line)]

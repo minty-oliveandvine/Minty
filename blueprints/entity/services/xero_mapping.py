@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import html
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.entity.services.settings import (COA_INCLUDED_TYPES, saveable_account_codes,
                                                  sync_chart_of_accounts_if_changed,

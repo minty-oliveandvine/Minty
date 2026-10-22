@@ -1,6 +1,6 @@
 from flask import flash, redirect, request, url_for
 from flask_login import current_user, login_required
-from loguru import logger
+from services.app_runtime.log import logger
 
 from blueprints.auth.services.hub_login import hub_login_url
 from blueprints.invitation import invitation_bp

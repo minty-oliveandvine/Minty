@@ -12,7 +12,7 @@ second save closed on the cash typed the time before), and a method the page nev
 """
 from __future__ import annotations
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 #: A method the Sales page lists but the save has always skipped (the old Deliveroo column).
 SKIPPED = "deliveroo_sales"

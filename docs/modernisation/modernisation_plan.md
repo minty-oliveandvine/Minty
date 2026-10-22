@@ -2224,11 +2224,11 @@ alternative.
 | Side | Language | Stack | Pinned to what already runs |
 |---|---|---|---|
 | every `-api` repo, `minty-shared-py`, `minty-db` | **Python 3.13** | **Django 5.2 LTS** + django-ninja 1.x + `psycopg[binary]` 3.x, pytest | 3.13 is the newest Python Django 5.2 LTS supports (supported to Apr 2028); Django 6.x supports 3.14 but has no LTS until 6.2 in Apr 2027 — bump to 3.14 then. `billing-backend`/`onboarding-backend` already pin `django <6.0`, so they move to 3.13 with a one-line Dockerfile change and no pin change. New services use `psycopg` 3 (Django's preferred driver, 3.13/3.14 wheels); the two existing ones keep `psycopg2-binary`. |
-| `minty-legacy` (Flask) | **Python 3.11** — stays | Flask 2.3 / SQLAlchemy 2.0 as today | It is being emptied, not upgraded. Nothing in it *needs* 3.11 (no removed-stdlib imports; all compiled deps have 3.12 wheels), but 3.13 would need `greenlet`/`pandas` bumps and `spire-doc 13.8.0` ([services/helpers/docx.py:17](services/helpers/docx.py#L17)) is a closed native lib with unverified 3.13 support. Not worth a test run on a repo with a shrinking lifespan. |
+| `minty-legacy` (Flask) | **Python 3.11** — stays (**superseded 2026-10-22: Flask, payment-request-api and onboarding-api are on 3.13**; spire-doc and pandas 2.2.2 were gone, and `greenlet` 3.1.1, `MarkupSafe` 3.0.2, `pandas` 2.2.3 were the only bumps) | Flask 2.3 / SQLAlchemy 2.0 as today | It is being emptied, not upgraded. Nothing in it *needs* 3.11 (no removed-stdlib imports; all compiled deps have 3.12 wheels), but 3.13 would need `greenlet`/`pandas` bumps and `spire-doc 13.8.0` ([services/helpers/docx.py:17](services/helpers/docx.py#L17)) is a closed native lib with unverified 3.13 support. Not worth a test run on a repo with a shrinking lifespan. |
 | every `-web` repo, `minty-shared-ts` | **TypeScript 5, strict** | Next.js 16 App Router, React 19, Tailwind v4, Vitest + Playwright | `onboarding` (Next 16.2.6, 58 TS files, zero `.js/.jsx` app code) and `billing-frontend` (16.1.6, 112 TS files) |
 
 Flask never imports `minty-db` or `minty-shared-py` (Minty keeps its own SQLAlchemy models until
-it is archived), so both shared packages declare `requires-python = ">=3.13"` and are free to use
+it is archived) - **amended 2026-10-22: Flask imports `minty-shared-py` for logging only (`minty_shared.logctx`/`.log`, the one line every backend writes), which is why it moved to 3.13 first** - so both shared packages declare `requires-python = ">=3.13"` and are free to use
 3.12+ syntax (PEP 695 `type` aliases, `class Foo[T]:`). Mixed Python versions across repos is
 the normal multi-repo condition; the only rule is that a shared package's floor is the lowest
 version of any *consumer*, and Flask is not one.
@@ -2609,6 +2609,11 @@ of the dump-restore in `docker/stack/README.md §3b`. `pettycash_test` loaders a
 the matching `billing-backend/core/*` (`core/links.py` is the rule-10 module, below). Version by git tag; each service pins
 `minty-shared @ git+https://github.com/minty-oliveandvine/minty-shared-py@v0.x` in
 `requirements.txt`. It depends on `minty-db` for the models `permissions` and `policy` query.
+
+**Started 2026-10-22 (`v0.1`) with logging only**: `minty_shared.logctx` (the one line format, the
+trace/user/entity/step context, `logging_config`) and `minty_shared.log` (loguru's call shape over
+stdlib). It is stdlib-only, so it has no `minty-db` dependency yet; the `core/*` lift above is
+still to come.
 
 `minty-shared-ts` (package `@minty/shared`): lift `minty-web/lib/*` (including `lib/links.ts`,
 the rule-10 module) and `minty-web/components/ui/*` (Part 2, the newest copies) together with

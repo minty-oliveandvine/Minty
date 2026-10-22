@@ -22,7 +22,7 @@ from typing import Iterable
 import pytz
 from flask import current_app
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from loguru import logger
+from services.app_runtime.log import logger
 from sqlalchemy import and_
 from sqlalchemy.orm import aliased
 

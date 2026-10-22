@@ -18,7 +18,7 @@ caller is the JWT's user_id and must hold XERO_SETTINGS_UPDATE on the entity.
 from __future__ import annotations
 
 import requests
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import Entity, User, db
 from services.auth.token_service import ensure_valid_token

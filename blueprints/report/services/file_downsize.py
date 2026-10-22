@@ -15,7 +15,7 @@ is returned anyway — callers should not block on size.
 
 import io
 
-from loguru import logger
+from services.app_runtime.log import logger
 
 TARGET_BYTES = 1 * 1024 * 1024  # 1 MB
 

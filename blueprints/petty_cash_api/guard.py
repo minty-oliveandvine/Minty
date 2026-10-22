@@ -13,6 +13,7 @@ membership here on every request, so a token minted for one company opens no oth
 from __future__ import annotations
 
 from flask import g, make_response, request
+from minty_shared import logctx
 
 from blueprints.petty_cash_api import petty_cash_api_bp
 from blueprints.petty_cash_api.api import refuse
@@ -45,6 +46,7 @@ def guard():
     user = db.session.get(User, str(claims["user_id"]))
     if user is None or not user.approved:
         return refuse("unauthorized", 401)
+    logctx.bind(user=user.id)
 
     company = _membership(user, g.petty_cash_entity_id)
     if company is None:
@@ -56,4 +58,5 @@ def guard():
 
     g.petty_cash_user = user
     g.petty_cash_company = company
+    logctx.bind(entity=company["id"])
     return None

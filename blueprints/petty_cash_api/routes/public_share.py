@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import timezone
 
-from loguru import logger
+from services.app_runtime.log import logger
 from werkzeug.exceptions import HTTPException
 
 from blueprints.petty_cash_api import petty_cash_public_bp
@@ -106,8 +106,8 @@ def _http_error(exc: HTTPException):
 @petty_cash_public_bp.errorhandler(Exception)
 def _failure(exc: Exception):
     """Logged with its type and the frames' source lines only: the address holds the secret, and
-    both a database error's message (its bound parameters) and loguru's ``diagnose`` (the frames'
-    variables) would print it. Answered generically."""
+    a database error's message (its bound parameters) would print it, as would any traceback
+    renderer that shows the frames' variables. Answered generically."""
     import traceback
 
     from models.db import db

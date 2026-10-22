@@ -20,7 +20,7 @@ Create Date: 2026-06-05
 """
 from alembic import op
 import sqlalchemy as sa
-from loguru import logger
+from services.app_runtime.log import logger
 
 # revision identifiers, used by Alembic.
 revision = "add_user_xero_email"

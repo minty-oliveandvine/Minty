@@ -7,7 +7,7 @@ from typing import Any
 import requests
 from flask import current_app
 from flask_login import current_user
-from loguru import logger
+from services.app_runtime.log import logger
 
 from models.db import (AccountInfo, Entity, EntityPettycashSettings,
                        XeroContactSync)
