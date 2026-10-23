@@ -242,7 +242,7 @@ def send_invitation_email(
             logger.error("Mail extension not configured")
             return False
 
-        logo_url = _asset_url(email_base_url(), "img/minty-mark.png")
+        logo_url = _asset_url(email_base_url(), "img/new_logo.png")
 
         msg = Message(
             # One line: a company name carrying a line break is a header Flask-Mail
@@ -612,8 +612,8 @@ def _build_invitation_html(
         <tr><td class="m-header"
                 style="background:#ffffff;
                        padding:24px 40px;text-align:center;">
-          <img src="{logo_url}" alt="Minty" width="72"
-               style="display:block;border:0;width:72px;max-width:72px;height:auto;margin:0 auto;" />
+          <img src="{logo_url}" alt="Minty" width="102"
+               style="display:block;border:0;width:102px;max-width:102px;height:auto;margin:0 auto;" />
         </td></tr>
 
         <!-- Body -->

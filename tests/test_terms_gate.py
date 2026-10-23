@@ -123,7 +123,7 @@ def test_the_health_check_is_never_gated(blocked, db_session):
 
 
 def test_static_files_are_never_gated(blocked, db_session):
-    response = blocked.get("/static/img/minty-mark.png")
+    response = blocked.get("/static/img/new_logo.png")
     assert response.status_code in (200, 304)  # anything but a redirect
 
 
