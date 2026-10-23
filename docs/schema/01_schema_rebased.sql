@@ -626,6 +626,18 @@
 --     only; a database already up gets the guarded ALTER in migration
 --     x1a01_invoice_line_span.
 --
+-- 24. AN INVOICE HAS ITS OWN NUMBER. Decided 2026-10-23 (owner):
+--     subscription_invoice.invoice_number = INV-<ACCOUNT>-YYYYMM-NNNN, e.g.
+--     INV-ACME-202610-0042. ACCOUNT is payer_billing_group.billing_company at issue,
+--     A-Z/0-9 only, at most 8 characters (no usable letter: the account's id, or the
+--     payer's, cut to 6); YYYYMM the month of issued_at in UTC, like the Date column;
+--     NNNN one counter per month for every account (subscription_invoice_counter, 2.52a).
+--     Given once, when the row is first open / paid / uncollectible / void - never to a
+--     draft - and never changed by a later rename. No backfill (owner: production has no
+--     invoices yet); a row without one keeps showing Stripe's id. minty-subscription-api
+--     writes it (billing/services/invoice_number.py). A database already up gets
+--     migrations/i1a01_invoice_number.sql.
+--
 -- ---------------------------------------------------------------------------
 -- HOW TO BUILD IT
 --
@@ -2243,12 +2255,26 @@ CREATE TABLE pettycash_test.subscription_invoice (
   idempotency_key    VARCHAR(255) NULL,
   issued_at          TIMESTAMPTZ  NULL,
   paid_at            TIMESTAMPTZ  NULL,
+  -- INV-<ACCOUNT>-YYYYMM-NNNN, given once when the invoice is first issued (item 24).
+  -- UNIQUE via idx_si_invoice_number at the end of this file; NULL on a draft.
+  invoice_number     VARCHAR(40)  NULL,
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
   updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
   CONSTRAINT subscription_invoice_pkey PRIMARY KEY (id),
   CONSTRAINT fk_si_user     FOREIGN KEY (payer_user_id)    REFERENCES pettycash_test.user (id),
   CONSTRAINT fk_si_group    FOREIGN KEY (billing_group_id) REFERENCES pettycash_test.payer_billing_group (id) ON DELETE SET NULL,
   CONSTRAINT fk_si_currency FOREIGN KEY (currency)         REFERENCES pettycash_test.currency_info (currency_code)
+);
+
+-- 2.52a subscription_invoice_counter  (item 24: the last invoice number given per month)
+--   period is YYYYMM in UTC. One counter for every account, so a number is unique on
+--   the counter alone. Taken with INSERT ... ON CONFLICT DO NOTHING, then UPDATE
+--   last_value + 1, in the invoice's own transaction: the row lock keeps two workers
+--   apart, and a rollback leaves no gap.
+CREATE TABLE pettycash_test.subscription_invoice_counter (
+  period     VARCHAR(6) NOT NULL,
+  last_value INTEGER    NOT NULL,
+  CONSTRAINT subscription_invoice_counter_pkey PRIMARY KEY (period)
 );
 
 -- 2.53 subscription_invoice_line
@@ -2495,6 +2521,10 @@ CREATE INDEX ix_subscription_transfer_collect
 -- The other half of the same finding. See the note on subscription_invoice.idempotency_key.
 CREATE UNIQUE INDEX idx_si_idempotency_key
   ON pettycash_test.subscription_invoice (idempotency_key);
+
+-- Item 24: an invoice number is never given twice.
+CREATE UNIQUE INDEX idx_si_invoice_number
+  ON pettycash_test.subscription_invoice (invoice_number);
 
 -- tracker 뷰 전용 커버링/부분 인덱스
 CREATE INDEX idx_efm_entity_covering
