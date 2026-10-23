@@ -6,8 +6,8 @@ and the one-hop pipeline) and `docs/modernisation/modernisation_plan.md` (the pl
 the cutover runbook).
 
 **Flask is backend only since 2026-10-20** (the owner's instruction): no templates, no pages;
-every screen is a Next.js app's. `static/` keeps only `img/minty-mark.png` (the invitation
-email's logo), `img/new_logo.png` and `img/email/*` (sources for
+every screen is a Next.js app's. `static/` keeps only `img/new_logo.png` (the invitation
+email's logo, and with `img/email/*` a source for
 `scripts/subscription/build_email_assets.py`). Every error answer - 404, 405, 500, a CSRF
 failure, the read-only superuser block - is JSON (`pettycash/core/hooks.py`).
 `tests/test_zz_no_html_frontend.py` fails on a templates folder, a `render_template` call or a

@@ -116,7 +116,8 @@ Renaming the company is reflected in the header at once - minty-web's Entity & I
   subject is one line (a company name with a line break was refused by Flask-Mail and the send
   swallowed), the inviter is the non-blank parts of their name, and the logo is served from
   `email_base_url()` - `ACCOUNTS_API_URL`, else the request's own root (the old fallback doubled
-  `/static/` and 404'd); `static/img/minty-mark.png` is kept for it. Tested in
+  `/static/` and 404'd); it is `static/img/new_logo.png`, the flat mark, drawn 102px wide (its
+  transparent margin leaves the cat ~72px; owner, 2026-10-23). Tested in
   `tests/test_char_access.py`.
 - **Email input: English only.** The server answers a non-ASCII address with "Email can only
   contain English letters, numbers and symbols." and a 400 - the invite, the onboarding invite,

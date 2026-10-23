@@ -350,8 +350,8 @@ def test_the_invitation_subject_is_one_line(app, client, db, mail):
 
 
 @pytest.mark.parametrize("public_url, logo", [
-    ("", "http://localhost/static/img/minty-mark.png?v="),
-    ("https://app.minty.test", "https://app.minty.test/static/img/minty-mark.png?v="),
+    ("", "http://localhost/static/img/new_logo.png?v="),
+    ("https://app.minty.test", "https://app.minty.test/static/img/new_logo.png?v="),
 ])
 def test_the_invitation_logo_is_served_from_static_once(company, client, mail, monkeypatch,
                                                         public_url, logo):
