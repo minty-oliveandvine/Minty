@@ -91,7 +91,8 @@ TABLE_SRC = {
 }
 
 # target tables with no source at all. Loaded by a later step or left empty.
-NO_SOURCE = {"report_expense_attachment"}   # RECEIPTS below, at the end of 03
+NO_SOURCE = {"report_expense_attachment",   # RECEIPTS below, at the end of 03
+             "subscription_invoice_counter"}  # starts empty: no backfill (01 item 24)
 
 # target column <- source column (same table), where only the name changed.
 OVERRIDE = {
@@ -837,6 +838,9 @@ BEGIN
 END $$;
 """ % {"D": DST, "e": SUPERADMIN_EMAIL}
 
+# Re-measured 2026-10-27 on production-backup_20261027.dump: 238 restored contacts - one of the
+# 10-06 build's is now in the synced table (a Xero sync re-created it), none new; accounts still
+# 10, nothing lost.
 # Re-measured 2026-10-06 on production-backup_20261006.dump: 239 restored contacts - three of
 # the 09-25 build's are now in the synced table (a Xero sync re-created them), and one is new (an
 # expense of 2026-10-05 naming a contact the sync table lacks); accounts still 10, nothing lost.
@@ -863,15 +867,17 @@ BEGIN
    WHERE NULLIF(se.account_id,'') IS NOT NULL AND d.account_id IS NULL;
   SELECT count(*) INTO lost_c FROM %(S)s.shop_expense se JOIN %(D)s.report_expense d ON d.id = se.id::uuid
    WHERE NULLIF(se.contact_id,'') IS NOT NULL AND d.contact_id IS NULL;
-  RAISE NOTICE 'R2  restored xero_contact_sync rows : %%   (expected 239)   %%', c, CASE WHEN c = 239 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R2  restored xero_contact_sync rows : %%   (expected 238)   %%', c, CASE WHEN c = 238 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  restored account_info rows      : %%   (expected 10)    %%', a, CASE WHEN a = 10 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  expenses that lost their account : %%   %%', lost_a, CASE WHEN lost_a = 0 THEN 'OK' ELSE '*** LOST ***' END;
   RAISE NOTICE 'R2  expenses that lost their contact : %%   %%', lost_c, CASE WHEN lost_c = 0 THEN 'OK' ELSE '*** LOST ***' END;
   IF lost_a > 0 OR lost_c > 0 THEN RAISE EXCEPTION 'R2: an expense lost a reference the source had'; END IF;
-  IF c <> 239 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
+  IF c <> 238 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 
+# Re-measured 2026-10-27 on production-backup_20261027.dump: 373 zero-count rows (+50, all posted
+# HKD reports dated 2026-10-05..10-26 - predicted from the source); still NULL 7 unchanged.
 # Re-measured 2026-10-06 on production-backup_20261006.dump: 323 zero-count rows (+24, all posted
 # reports dated 2026-09-25..10-05 - predicted from the source exactly); still NULL 7 unchanged.
 # Re-measured 2026-09-25 on production-backup_20260925.dump: 299 zero-count rows (+2 in a day);
@@ -919,9 +925,9 @@ BEGIN
   -- 7 of the 284 are Test_1 (PHP): the catalogue has no PHP denominations, so
   -- there is no row to carry the zero on and the app could never have counted
   -- them either. Reported and asserted, not carried.
-  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 323)   %%', n, CASE WHEN n = 323 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 373)   %%', n, CASE WHEN n = 373 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %%   (expected 7)   %%', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
-  IF n <> 323 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+  IF n <> 373 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 

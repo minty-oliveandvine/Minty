@@ -939,7 +939,7 @@ CREATE TABLE pettycashv3.entity_module_subscription (
   id               UUID                              NOT NULL DEFAULT gen_random_uuid(),
   entity_id        UUID                              NOT NULL,
   function_code    pettycashv3.module_code        NOT NULL,
-  payer_user_id    UUID                              NOT NULL,
+  payer_user_id    UUID                              NULL,
   phase            pettycashv3.subscription_phase NOT NULL,
   app_access_until TIMESTAMPTZ                       NULL,
   trial_end        TIMESTAMPTZ                       NULL,
@@ -988,12 +988,20 @@ CREATE TABLE pettycashv3.subscription_invoice (
   idempotency_key    VARCHAR(255) NULL,
   issued_at          TIMESTAMPTZ  NULL,
   paid_at            TIMESTAMPTZ  NULL,
+
+  invoice_number     VARCHAR(40)  NULL,
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
   updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
   CONSTRAINT subscription_invoice_pkey PRIMARY KEY (id),
   CONSTRAINT fk_si_user     FOREIGN KEY (payer_user_id)    REFERENCES pettycashv3.user (id),
   CONSTRAINT fk_si_group    FOREIGN KEY (billing_group_id) REFERENCES pettycashv3.payer_billing_group (id) ON DELETE SET NULL,
   CONSTRAINT fk_si_currency FOREIGN KEY (currency)         REFERENCES pettycashv3.currency_info (currency_code)
+);
+
+CREATE TABLE pettycashv3.subscription_invoice_counter (
+  period     VARCHAR(6) NOT NULL,
+  last_value INTEGER    NOT NULL,
+  CONSTRAINT subscription_invoice_counter_pkey PRIMARY KEY (period)
 );
 
 CREATE TABLE pettycashv3.subscription_invoice_line (
@@ -1187,6 +1195,9 @@ CREATE INDEX ix_subscription_transfer_collect
 
 CREATE UNIQUE INDEX idx_si_idempotency_key
   ON pettycashv3.subscription_invoice (idempotency_key);
+
+CREATE UNIQUE INDEX idx_si_invoice_number
+  ON pettycashv3.subscription_invoice (invoice_number);
 
 CREATE INDEX idx_efm_entity_covering
   ON pettycashv3.entity_function_map (entity_id) INCLUDE (entity_function_id, is_enabled);
