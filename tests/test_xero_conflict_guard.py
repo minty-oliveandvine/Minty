@@ -858,6 +858,90 @@ def test_an_empty_auth_event_with_nothing_held_still_says_nothing_was_picked(mon
     assert entity_new.xero_org_id is None
 
 
+def _connect_with_empty_event(monkeypatch, state, tenants, *, reconnect=False):
+    """Run the callback where the auth event granted nothing and the token sees ``tenants``,
+    none of them held by any company. Returns (response, entity, flashes, revoked urls)."""
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity = _make_entity("entity-new", xero_org_id=None,
+                          status="disconnected" if reconnect else "onboarding")
+    entity.financial_year_end_day = entity.financial_year_end_month = None
+    _patch_callback_common(
+        monkeypatch, user=user, entities_by_id={"entity-new": entity},
+        session=session, connect_tenant=tenants[0] if tenants else "tenant-X", conflict_entity=None,
+    )
+    if reconnect:
+        _patch_reconnect_target(monkeypatch, entity)
+    stub = _event_empty_but_token_sees(tenants)
+    deleted = []
+    monkeypatch.setattr(xero_routes, "requests", SimpleNamespace(
+        get=stub.get, delete=lambda url, *_a, **_kw: deleted.append(url) or SimpleNamespace(status_code=204),
+    ))
+    said = []
+    monkeypatch.setattr(xero_routes, "flash", lambda message, *_a, **_k: said.append(str(message)))
+    with app.test_request_context(f"/callback?state={state}&code=c&entity_id=entity-new"):
+        response = xero_routes.xero_callback()
+    return response, entity, said, deleted
+
+
+def test_an_empty_auth_event_connects_the_one_organisation_nobody_holds(monkeypatch):
+    """THE 2026-10-27 COPY TEST: Demo Company was already connected to the Minty app by an
+    earlier sign-in (a company in another database), so Xero granted nothing new - but the
+    token could see it and no company here held it. It was dropped with "not connected to
+    Xero yet". One unclaimed organisation is the one the person picked: connect it."""
+    response, entity, said, deleted = _connect_with_empty_event(
+        monkeypatch, "entity_connect:entity-new", ["tenant-X"])
+
+    assert response.status_code == 302
+    assert entity.xero_org_id == "tenant-X"
+    assert (entity.financial_year_end_day, entity.financial_year_end_month) == (31, 3)
+    assert any("Connected to Xero" in m for m in said), said
+    assert not any("not connected to Xero yet" in m for m in said), said
+    assert deleted == []
+
+
+def test_onboarding_connects_the_one_unclaimed_organisation_and_says_so(monkeypatch):
+    response, entity, _said, _deleted = _connect_with_empty_event(
+        monkeypatch, "entity_connect_onboarding:entity-new", ["tenant-X"])
+
+    assert "xero=connected" in response.location
+    assert entity.xero_org_id == "tenant-X"
+    assert entity.status == "onboarding"  # only finalize clears it
+
+
+def test_several_unclaimed_organisations_connect_none_and_ask_to_choose(monkeypatch):
+    """Two organisations the token sees, neither held: the event can't say which was picked,
+    so nothing is guessed, nothing handed back, and the person is told what to do."""
+    response, entity, said, deleted = _connect_with_empty_event(
+        monkeypatch, "entity_connect_onboarding:entity-new", ["tenant-X", "tenant-Y"])
+
+    assert "xero=choose" in response.location
+    assert entity.xero_org_id is None
+    assert deleted == []
+    assert not any("not connected to Xero yet" in m for m in said), said
+
+
+def test_reconnect_connects_the_one_unclaimed_organisation(monkeypatch):
+    response, entity, said, deleted = _connect_with_empty_event(
+        monkeypatch, "entity_reconnect:u1", ["tenant-X"], reconnect=True)
+
+    assert response.location == "/entity_settings"
+    assert entity.xero_org_id == "tenant-X" and entity.status == "connected"
+    assert not any("No organization was picked" in m for m in said), said
+    assert deleted == []
+
+
+def test_reconnect_with_several_unclaimed_organisations_connects_none(monkeypatch):
+    _response, entity, said, deleted = _connect_with_empty_event(
+        monkeypatch, "entity_reconnect:u1", ["tenant-X", "tenant-Y"], reconnect=True)
+
+    assert entity.xero_org_id is None
+    assert deleted == []
+    assert any("more than one" in m for m in said), said
+    assert not any("No organization was picked" in m for m in said), said
+
+
 def test_reconnect_with_an_empty_auth_event_names_the_holder(monkeypatch):
     """The owner's actual route: the Entity & Integration tab's Connect button goes to
     ``/xero_reconnect``, so the reconnect branch is the one that said "No organization was

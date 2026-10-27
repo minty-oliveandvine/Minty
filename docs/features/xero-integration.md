@@ -67,6 +67,15 @@ names the holder; only when the token sees no organisation does it still say not
 picked. **It revokes nothing** — what the token sees was granted by earlier auth events, so
 handing one back would disconnect the other company.
 
+When no company holds anything the token sees (owner, 2026-10-27 - the copy test: Demo
+Company was linked to the app by a company in another database), `_unclaimed_connections`
+decides: **exactly one** organisation → it is the one picked, and it is connected through the
+ordinary path (guard, financial year end, cache invalidation, background sync) as if the event
+had granted it; **more than one** → nothing is connected or revoked, and the person is told to
+disconnect Minty from the organisations this company won't use in Xero, then connect again
+(`SEVERAL_UNCLAIMED_ORGS`; onboarding gets `xero=choose`, since a flash doesn't survive the
+trip). Tests: `tests/test_xero_conflict_guard.py` (`test_*unclaimed*`).
+
 A refusal `_revoke_new_grant`s (the OAuth exchange has already completed, so the grant exists
 on Xero's side — except on an empty auth event, where there is no new grant) and then
 `_refuse_conflict` flashes one sentence AND signs the holder into the redirect — `sign_conflict` / `read_conflict` (`entity/services/entity_list.py`, its own salt,

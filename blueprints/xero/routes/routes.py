@@ -85,7 +85,8 @@ def _onboarding_xero_return(connected: bool, org_name: str = "",
                             mismatch: bool = False, expected: str = "",
                             conflict: bool = False, conflict_entity: str = "",
                             conflict_entity_id: str = "",
-                            conflict_can_move: bool = False):
+                            conflict_can_move: bool = False,
+                            choose: bool = False):
     """Redirect back into the onboarding app at the Accounting step (3).
 
     ``org_name`` is the Xero tenant/org name so onboarding can show the real
@@ -107,6 +108,10 @@ def _onboarding_xero_return(connected: bool, org_name: str = "",
     what ``POST /api/onboarding/xero/release`` frees, and can_move is whether
     this person may free it (re-checked there). Without the permission the
     wizard can only name the company to ask.
+
+    ``choose`` (``xero=choose``): Xero granted nothing and the token sees several
+    organisations no company holds, so none was connected - the wizard says how to narrow
+    it down (``SEVERAL_UNCLAIMED_ORGS``; a flash does not survive the trip there).
     """
     from urllib.parse import urlencode
 
@@ -114,6 +119,8 @@ def _onboarding_xero_return(connected: bool, org_name: str = "",
         flag = "mismatch"
     elif conflict:
         flag = "conflict"
+    elif choose:
+        flag = "choose"
     elif connected:
         flag = "connected"
     else:
@@ -750,6 +757,23 @@ def _claimed_elsewhere(connections, target_entity_id, connecting_user_id):
     return None
 
 
+SEVERAL_UNCLAIMED_ORGS = (
+    "Xero didn't say which organisation you picked, and this Xero login has more than one "
+    "linked to Minty. In Xero, disconnect Minty from the organisations this company won't "
+    "use, then connect again."
+)
+
+
+def _unclaimed_connections(connections):
+    """The connections a company could take after ``_claimed_elsewhere`` found no holder.
+
+    Every tenant was just put through ``_live_org_claimant`` and none is held, so each one
+    with a tenant id is free. Exactly one is the organisation the person picked: Xero grants
+    nothing new when it is already connected to the app (a company in another database, a
+    disconnect Minty never saw), but the token still sees it (owner, 2026-10-27)."""
+    return [c for c in connections or [] if c.get("tenantId")]
+
+
 @xero_bp.route("/callback", methods=["GET"])
 def xero_callback():
     code = request.args.get("code")
@@ -999,8 +1023,9 @@ def xero_callback():
                             entity_id, user, from_onboarding,
                             entity_name=state_entity_name,
                         )
+                        seen = _all_connections(response.get("access_token"))
                         held = _claimed_elsewhere(
-                            _all_connections(response.get("access_token")),
+                            seen,
                             target.id if target is not None else entity_id,
                             user.id,
                         )
@@ -1023,17 +1048,36 @@ def xero_callback():
                                     conflict_can_move=refusal["can_move"],
                                 )
                             return redirect(url_for("entity.entity_list"))
-                        flash(
-                            "Entity created! It's not connected to Xero yet — want to connect it now?",
-                            "warning",
-                        )
-                        logger.error(
-                            "User did not select an entity in the dropdown in allow in xero's allow access page"
-                        )
-                        if from_onboarding:
-                            return _onboarding_xero_return(False)
-                        return redirect(url_for("entity.entity_list"))
-                    elif curr_conn:
+                        free = _unclaimed_connections(seen)
+                        if len(free) == 1:
+                            logger.info(
+                                "Xero connect: the auth event granted nothing; "
+                                "connecting the one organisation the token sees "
+                                "that no company holds (%s)", free[0].get("tenantId"),
+                            )
+                            curr_conn = free
+                        elif free:
+                            logger.warning(
+                                "Xero connect: the auth event granted nothing and "
+                                "%d unclaimed organisations are visible; not guessing",
+                                len(free),
+                            )
+                            flash(SEVERAL_UNCLAIMED_ORGS, "warning")
+                            if from_onboarding:
+                                return _onboarding_xero_return(False, choose=True)
+                            return redirect(url_for("entity.entity_list"))
+                        else:
+                            flash(
+                                "Entity created! It's not connected to Xero yet — want to connect it now?",
+                                "warning",
+                            )
+                            logger.error(
+                                "User did not select an entity in the dropdown in allow in xero's allow access page"
+                            )
+                            if from_onboarding:
+                                return _onboarding_xero_return(False)
+                            return redirect(url_for("entity.entity_list"))
+                    if curr_conn:
                         try:
                             tenant_id = curr_conn[0]["tenantId"]
                             if tenant_id is None:
@@ -1302,11 +1346,8 @@ def xero_callback():
                         # comes back empty. The guard below never ran, and this
                         # message blamed the person for a choice they had made.
                         # So: ask what this token can see and name the holder.
-                        held = _claimed_elsewhere(
-                            _all_connections(response.get("access_token")),
-                            entity_id,
-                            user.id,
-                        )
+                        seen = _all_connections(response.get("access_token"))
+                        held = _claimed_elsewhere(seen, entity_id, user.id)
                         if held is not None:
                             logger.warning(
                                 "Xero reconnect blocked: the auth event granted "
@@ -1323,12 +1364,28 @@ def xero_callback():
                                     entity_id=entity_id,
                                     xero_conflict=_refuse_conflict(held, user)["token"],
                                 ))
-                        flash(
-                            "No organization was picked on Xero's approval screen, so this entity is still disconnected. Mind trying again?", "danger", )
-                        logger.error(
-                            "User did not select an entity in the dropdown in allow in xero's allow access page"
-                        )
-                    else:
+                        free = _unclaimed_connections(seen)
+                        if len(free) == 1:
+                            logger.info(
+                                "Xero reconnect: the auth event granted nothing; "
+                                "connecting the one organisation the token sees "
+                                "that no company holds (%s)", free[0].get("tenantId"),
+                            )
+                            curr_conn = free
+                        elif free:
+                            logger.warning(
+                                "Xero reconnect: the auth event granted nothing and "
+                                "%d unclaimed organisations are visible; not guessing",
+                                len(free),
+                            )
+                            flash(SEVERAL_UNCLAIMED_ORGS, "warning")
+                        else:
+                            flash(
+                                "No organization was picked on Xero's approval screen, so this entity is still disconnected. Mind trying again?", "danger", )
+                            logger.error(
+                                "User did not select an entity in the dropdown in allow in xero's allow access page"
+                            )
+                    if curr_conn:
                         try:
                             tenant_id = curr_conn[0]["tenantId"]
                             if tenant_id is None:
