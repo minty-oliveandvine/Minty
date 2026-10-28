@@ -1501,9 +1501,9 @@ BEGIN
   -- 7 of the 284 are Test_1 (PHP): the catalogue has no PHP denominations, so
   -- there is no row to carry the zero on and the app could never have counted
   -- them either. Reported and asserted, not carried.
-  RAISE NOTICE 'R4  zero-count rows added : %   (expected 373)   %', n, CASE WHEN n = 373 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-count rows added : %   (expected 375)   %', n, CASE WHEN n = 375 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %   (expected 7)   %', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
-  IF n <> 373 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+  IF n <> 375 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
 END $$;
 
 -- R7 -- the sales did not move. Per kept report, the report_sale rows sum to

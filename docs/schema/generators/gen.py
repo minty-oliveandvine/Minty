@@ -876,6 +876,8 @@ BEGIN
 END $$;
 """ % {"S": SRC, "D": DST}
 
+# Re-measured 2026-10-28 on production-backup_20261028.dump: 375 zero-count rows (+2, posted HKD
+# reports dated 2026-10-21 and 10-27 - predicted from the source exactly); still NULL 7 unchanged.
 # Re-measured 2026-10-27 on production-backup_20261027.dump: 373 zero-count rows (+50, all posted
 # HKD reports dated 2026-10-05..10-26 - predicted from the source); still NULL 7 unchanged.
 # Re-measured 2026-10-06 on production-backup_20261006.dump: 323 zero-count rows (+24, all posted
@@ -925,9 +927,9 @@ BEGIN
   -- 7 of the 284 are Test_1 (PHP): the catalogue has no PHP denominations, so
   -- there is no row to carry the zero on and the app could never have counted
   -- them either. Reported and asserted, not carried.
-  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 373)   %%', n, CASE WHEN n = 373 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 375)   %%', n, CASE WHEN n = 375 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %%   (expected 7)   %%', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
-  IF n <> 373 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+  IF n <> 375 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 

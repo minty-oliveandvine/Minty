@@ -1425,9 +1425,9 @@ BEGIN
     LEFT JOIN pettycash_test.report_cash_summary v ON v.report_id = d.id
    WHERE s.actual_cash_total = 0 AND v.actual_cash_total IS NULL;
 
-  RAISE NOTICE 'R4  zero-count rows added : %   (expected 373)   %', n, CASE WHEN n = 373 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-count rows added : %   (expected 375)   %', n, CASE WHEN n = 375 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %   (expected 7)   %', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
-  IF n <> 373 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+  IF n <> 375 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
 END
 $$;
 
