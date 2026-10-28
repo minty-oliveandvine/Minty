@@ -330,6 +330,13 @@ Option A (the three Next.js apps on Cloudflare Workers, `dailyminty.com` on Clou
 backends still on Render) stays parked on the `infra-cloudflare` branches of `minty-infra`,
 Minty and the three Next.js repos.
 
+**Cloudflare trial (2026-10-28):** the five front ends, built from `main`, also run as Workers
+on `workers.dev` beside Vercel - `my.`, `payment-request.`, `onboarding.`, `pettycash.` and
+`www.dailyminty.workers.dev` - against production's backends (`EXTRA_FRONTEND_ORIGINS` on Flask,
+`CORS_ALLOWED_ORIGINS` on the APIs, set in `minty-infra`'s `extra_env`). Each repo's local
+`cloudflare-trial` branch (worktree `C:\Github\<repo>-cf`) holds its `wrangler.jsonc`; nothing is
+pushed and Vercel and DNS are unchanged.
+
 `minty-infra/services.tf` holds this table and nothing else generates a hostname. Every
 backend host answered its health check on 2026-10-13.
 
@@ -342,7 +349,7 @@ backend host answered its health check on 2026-10-13.
 | Payment Request API | `payment-request-api.dailyminty.com` | `dev-payment-request-api.dailyminty.com` | Render |
 | Onboarding API | `onboarding-api.dailyminty.com` | `dev-onboarding-api.dailyminty.com` | Render |
 | Minty web hub | `my.dailyminty.com` | `dev-my.dailyminty.com` | Vercel |
-| Payment Request web | `payment.dailyminty.com` | `dev-payment-request.dailyminty.com` | Vercel |
+| Payment Request web | `payment-request.dailyminty.com` (since 2026-10-28; `payment.` is a 308 to it) | `dev-payment-request.dailyminty.com` | Vercel |
 | Onboarding web | `onboarding.dailyminty.com` | `dev-onboarding.dailyminty.com` | Vercel |
 | Marketing site | `www.dailyminty.com` | `dev-www.dailyminty.com` | Vercel |
 
