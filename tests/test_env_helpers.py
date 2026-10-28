@@ -317,3 +317,49 @@ def test_a_loose_preview_origin_regex_is_refused(monkeypatch, raw):
     monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", raw)
     with pytest.raises(ValueError, match="PREVIEW_ORIGIN_REGEX"):
         env.preview_origin_regex()
+
+
+# --- EXTRA_FRONTEND_ORIGINS ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw", [None, "", "   "])
+def test_extra_frontend_origins_unset_is_off(monkeypatch, raw):
+    if raw is None:
+        monkeypatch.delenv("EXTRA_FRONTEND_ORIGINS", raising=False)
+    else:
+        monkeypatch.setenv("EXTRA_FRONTEND_ORIGINS", raw)
+    assert env.extra_frontend_origins() == {}
+
+
+def test_extra_frontend_origins_reads_one_origin_per_app(monkeypatch):
+    monkeypatch.setenv(
+        "EXTRA_FRONTEND_ORIGINS",
+        " my=https://minty-web.acme.workers.dev , pettycash=https://minty-petty-cash-web.acme.workers.dev",
+    )
+    assert env.extra_frontend_origins() == {
+        "my": "https://minty-web.acme.workers.dev",
+        "pettycash": "https://minty-petty-cash-web.acme.workers.dev",
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "www=https://minty-www.acme.workers.dev",  # not an app Flask hands over to
+        "my=http://minty-web.acme.workers.dev",
+        "my=https://minty-web.acme.workers.dev/",
+        "my=https://minty-web.acme.workers.dev/path",
+        "my=https://minty-web.acme.workers.dev:443",
+        "my=https://minty-web.acme.workers.dev?x=1",
+        "my=https://Minty-Web.acme.workers.dev",
+        "my=https://user@minty-web.acme.workers.dev",
+        "my=https://a.test,my=https://b.test",
+        "https://minty-web.acme.workers.dev",
+        "my=",
+        "my=https://a.test,",
+    ],
+)
+def test_a_malformed_extra_frontend_origin_is_refused(monkeypatch, raw):
+    monkeypatch.setenv("EXTRA_FRONTEND_ORIGINS", raw)
+    with pytest.raises(ValueError, match="EXTRA_FRONTEND_ORIGINS"):
+        env.extra_frontend_origins()

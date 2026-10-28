@@ -361,6 +361,27 @@ set, Flask hands a person back into the set they came from instead of the config
 November launch (owner, 2026-10-13), development after** - so until then a preview signs in with
 production tokens against production data.
 
+### 6.2 The alternate set — a second copy of the front ends (`EXTRA_FRONTEND_ORIGINS`, 2026-10-28)
+
+For the Cloudflare trial (the five front ends built from `main` on `*.workers.dev` Workers beside
+Vercel), **`EXTRA_FRONTEND_ORIGINS`** lists one more set origin by origin:
+`my=https://…,payment-request=https://…,onboarding=https://…,pettycash=https://…` (any subset).
+It reuses 6.1's machinery under the stored slug `~alt` (`preview_origin.ALT_SLUG`):
+
+- A `return_origin` exactly equal to one of them names the alternate set **from any trip**,
+  cross-site included: a workers.dev page is never same-site with dailyminty.com, and the hosts
+  are exact, ours, and run production's code - the trust a configured origin already has.
+- Hand-offs (`handoff_origin`) go to the listed origin for that app; an app it does not list
+  keeps its configured origin. The 30-minute lapse, "a configured origin leaves it" and logout
+  apply as in 6.1.
+- CORS echoes a listed origin only on its own app's surfaces (hub: `my`/`payment-request`/
+  `pettycash`; onboarding routes: `onboarding`; Petty Cash API: `pettycash`).
+- Unset, a stored alternate set is ignored at once. A malformed value (an unknown app, a repeat,
+  anything but a bare lowercase `https://host`) refuses to boot
+  (`services/app_runtime/env.extra_frontend_origins`).
+- minty-onboarding-web sends no `return_origin`, so its own trips to Flask (the Xero return)
+  land on the configured onboarding app.
+
 ## 7. Xero OAuth tokens (the company's accounting connection)
 
 Different thing from sign-in: a **per-user** `user_token` row (access token, refresh token,
@@ -418,6 +439,7 @@ the payment module counts as leaving.
 | `PETTY_CASH_WEB_URL` | minty-petty-cash-web's origin (default `http://localhost:3010`): `/handoff/petty-cash-web`'s target, the share-link redirect, the Petty Cash API's and hub routes' CORS |
 | `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL` | minty-web's and minty-payment-request-web's origins - the hand-offs, and the hub routes' CORS |
 | `PREVIEW_ORIGIN_REGEX` | optional: the branch preview sets Flask may hand back into (section 6.1); unset = off |
+| `EXTRA_FRONTEND_ORIGINS` | optional: the alternate set's origins, one per app (section 6.2); unset = off |
 | `IDLE_TIMEOUT_SECONDS` | the presence window (there is no idle logout) |
 
 Every service's variables are listed in [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md).

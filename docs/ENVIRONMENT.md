@@ -181,7 +181,8 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 - Optional: `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
   legal flags (`REQUIRE_TERMS_AT_SIGNUP`, `CURRENT_TERMS_VERSION`, `CURRENT_PRIVACY_VERSION`),
   `INVITATION_*`, `AUTO_SUPERUSER_EMAILS`, `LOG_LEVEL`, `SESSION_TYPE`,
-  `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker), `PREVIEW_ORIGIN_REGEX`.
+  `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker), `PREVIEW_ORIGIN_REGEX`,
+  `EXTRA_FRONTEND_ORIGINS`.
 
 **Payment Request API (`minty-payment-request-api`, Django)**
 - Required: `APP_ENV`, `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, `S3_URL`,
@@ -209,6 +210,12 @@ origins, `https://pr-<branch>-<app>.dailyminty.com`: the APIs add it to CORS, Fl
 back into the set (`docs/features/authentication.md` 6.1). minty-infra sets it, narrowed per
 service, on ONE environment's backends only (`var.preview_backend`: production until the November
 launch, then development); every service refuses to boot on a looser value.
+
+`EXTRA_FRONTEND_ORIGINS` (Flask only, unset = off; 2026-10-28) lists a second copy of the front
+ends origin by origin, `my=https://…,payment-request=…,onboarding=…,pettycash=…` - the
+Cloudflare trial's `*.workers.dev` Workers. Flask hands back into it and echoes it in CORS
+(`docs/features/authentication.md` 6.2); the APIs take the same origins through their
+`CORS_ALLOWED_ORIGINS` override, which must then also list their defaults.
 
 **Minty web hub (`minty-web`, Next.js)**: `PETTY_CASH_URL`, `SUBSCRIPTION_API_URL`,
 `PAYMENT_REQUEST_WEB_URL`.

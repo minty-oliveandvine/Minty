@@ -361,3 +361,104 @@ def test_outside_a_request_every_handoff_is_the_configured_one(app, on):
 
     with app.app_context():
         assert create._onboarding_base_url() == "https://onboarding.minty.test"
+
+
+# --- the alternate set: EXTRA_FRONTEND_ORIGINS -----------------------------------------------
+# A second copy of the front ends on other hosts (the Cloudflare trial's workers.dev Workers),
+# listed origin by origin. Our own exact hosts, so - like the configured ones - any trip may name
+# them, including the cross-site one a workers.dev page makes.
+
+ALT_MY = "https://minty-web.acme.workers.dev"
+ALT_PR = "https://minty-payment-request-web.acme.workers.dev"
+ALT_PC = "https://minty-petty-cash-web.acme.workers.dev"
+CROSS_SITE = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}
+
+
+@pytest.fixture
+def alt(monkeypatch, hosts):
+    monkeypatch.delenv("PREVIEW_ORIGIN_REGEX", raising=False)
+    monkeypatch.setenv("EXTRA_FRONTEND_ORIGINS", f"my={ALT_MY},payment-request={ALT_PR},pettycash={ALT_PC}")
+
+
+def test_an_extra_origin_names_the_alternate_set_from_any_trip(client, alt, owner):
+    F.login(client, owner)
+    resp = client.get(f"/handoff/minty-web?next=/subscription&return_origin={ALT_MY}", headers=CROSS_SITE)
+    parts = urlsplit(resp.headers["Location"])
+    assert (parts.scheme, parts.netloc, parts.path) == ("https", "minty-web.acme.workers.dev", "/landing")
+    assert parse_qs(parts.query)["token"]
+    assert _stored(client) == "~alt"
+
+
+@pytest.mark.parametrize("origin", [f"{ALT_MY}.evil.com", "https://evil.workers.dev", f"{ALT_MY}/x"])
+def test_only_a_listed_origin_names_the_alternate_set(client, alt, origin):
+    client.get("/", query_string={"return_origin": origin}, headers=CROSS_SITE)
+    assert _stored(client) is None
+
+
+def test_every_app_is_reached_in_the_alternate_set(app, alt):
+    from blueprints.auth.services.hub_login import hub_login_url
+    from blueprints.entity.routes import create, modules
+    from blueprints.shared import bearer_api, preview_origin
+
+    with app.test_request_context("/", headers=SAME_ORIGIN):
+        session["preview_set"] = _set("~alt")
+        assert hub_login_url(carry_flashes=False) == f"{ALT_MY}/login"
+        assert modules._frontend_origin() == ALT_PR
+        assert preview_origin.handoff_origin("pettycash", bearer_api.petty_cash_web_origin()) == ALT_PC
+        # an app with no extra origin keeps its configured one
+        assert create._onboarding_base_url() == "https://onboarding.minty.test"
+
+
+def test_the_alternate_set_is_dropped_once_the_variable_is_gone(app, hosts, monkeypatch):
+    from blueprints.auth.services.hub_login import hub_login_url
+
+    monkeypatch.delenv("EXTRA_FRONTEND_ORIGINS", raising=False)
+    with app.test_request_context("/", headers=SAME_ORIGIN):
+        session["preview_set"] = _set("~alt")
+        assert hub_login_url(carry_flashes=False) == "https://my.minty.test/login"
+
+
+def test_a_configured_origin_leaves_the_alternate_set(client, alt):
+    client.get(f"/?return_origin={ALT_MY}", headers=CROSS_SITE)
+    client.get("/?return_origin=https://my.minty.test", headers=SAME_SITE)
+    assert _stored(client) is None
+
+
+@pytest.mark.parametrize(
+    ("origin", "allowed"),
+    [(ALT_MY, True), (ALT_PR, True), (ALT_PC, True), ("https://my.minty.test", True), ("https://evil.workers.dev", False)],
+)
+def test_the_hub_api_answers_an_extra_origin(app, alt, origin, allowed):
+    from blueprints.shared import hub_api
+
+    with app.test_request_context("/", headers={"Origin": origin}):
+        resp = hub_api.cors(make_response("{}"))
+    assert (resp.headers["Access-Control-Allow-Origin"] == origin) is allowed
+
+
+def test_an_extra_origin_is_answered_only_by_its_own_app_s_surface(app, alt, monkeypatch):
+    from blueprints.entity.routes import create
+
+    with app.test_request_context("/", headers={"Origin": ALT_MY}):
+        assert create._cors(make_response("{}")).headers["Access-Control-Allow-Origin"] == "https://onboarding.minty.test"
+    monkeypatch.setenv("EXTRA_FRONTEND_ORIGINS", "onboarding=https://minty-onboarding-web.acme.workers.dev")
+    with app.test_request_context("/", headers={"Origin": "https://minty-onboarding-web.acme.workers.dev"}):
+        resp = create._cors(make_response("{}"))
+    assert resp.headers["Access-Control-Allow-Origin"] == "https://minty-onboarding-web.acme.workers.dev"
+
+
+def test_flashes_are_dropped_on_the_way_into_the_alternate_set(app, alt):
+    from pettycash.core.hooks import drop_flashes_leaving_flask
+
+    with app.test_request_context("/"):
+        session["_flashes"] = [("info", "Connected to Xero!")]
+        drop_flashes_leaving_flask(redirect(f"{ALT_MY}/landing"))
+        assert "_flashes" not in session
+
+
+def test_a_malformed_extra_origin_stops_the_app_from_booting(app, monkeypatch):
+    import sys
+
+    monkeypatch.setenv("EXTRA_FRONTEND_ORIGINS", "my=https://minty-web.acme.workers.dev/")
+    with pytest.raises(ValueError, match="EXTRA_FRONTEND_ORIGINS"):
+        sys.modules["services.app_runtime.legacy.bootstrap"].create_app()

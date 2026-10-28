@@ -13,6 +13,8 @@ readers on top.
   The schema rides in the URL and is popped before the URL reaches a driver; every other
   query parameter is kept.
 * ``S3_URL`` - ``https://KEY:SECRET@s3.<region>.backblazeb2.com/<bucket>``.
+* ``EXTRA_FRONTEND_ORIGINS`` - ``my=https://…,pettycash=https://…``: a second copy of the front
+  ends on other hosts (``blueprints.shared.preview_origin``); unset is none.
 * ``SMTP_URL`` - ``smtp://user:pass@host:587`` (STARTTLS) or ``smtps://user:pass@host:465``
   (implicit SSL); ``?timeout=`` seconds (default 10), ``?tls=0`` for a local catcher.
 """
@@ -50,6 +52,7 @@ __all__ = [
     "app_env",
     "database_schema",
     "database_url",
+    "extra_frontend_origins",
     "flag",
     "is_development",
     "parse_database_url",
@@ -91,6 +94,34 @@ def preview_origin_regex() -> re.Pattern[str] | None:
     must never open the hand-off to another host. Every backend applies the same rule
     (``minty_shared.config``)."""
     return _preview_origin_regex(os.environ.get("PREVIEW_ORIGIN_REGEX"))
+
+
+#: The front ends Flask hands people over to, by their set-host label (``preview_origin``).
+FRONTEND_APPS = ("my", "payment-request", "onboarding", "pettycash")
+#: One bare https origin: a lowercase host, no port, path, query or credentials.
+_BARE_HTTPS_ORIGIN = re.compile(r"https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?")
+
+
+def extra_frontend_origins() -> dict[str, str]:
+    """``EXTRA_FRONTEND_ORIGINS``: ``{app: origin}`` for a second copy of the front ends on other
+    hosts (the Cloudflare trial's Workers), or ``{}`` (unset = off).
+
+    The value is ``app=origin`` pairs separated by commas, each app one of ``FRONTEND_APPS``
+    at most once. These origins receive hand-off tokens, so anything but an exact bare https
+    origin raises ``ValueError`` - a typo must never open the hand-off to another host."""
+    raw = (os.environ.get("EXTRA_FRONTEND_ORIGINS") or "").strip()
+    if not raw:
+        return {}
+    origins: dict[str, str] = {}
+    for item in raw.split(","):
+        app, sep, origin = (part.strip() for part in item.partition("="))
+        if not sep or app not in FRONTEND_APPS or app in origins or not _BARE_HTTPS_ORIGIN.fullmatch(origin):
+            raise ValueError(
+                f"EXTRA_FRONTEND_ORIGINS: {item.strip()!r} is not <app>=https://<host> with app one of "
+                f"{', '.join(FRONTEND_APPS)}, each at most once"
+            )
+        origins[app] = origin
+    return origins
 
 
 def database_url() -> str:

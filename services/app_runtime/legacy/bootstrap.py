@@ -33,8 +33,8 @@ from pettycash.core import http_hardening
 from pettycash.core.hooks import init_app as init_hooks
 from blueprints.shared import entity_ref, preview_origin
 from blueprints.shared.schema import SCHEMA
-from services.app_runtime.env import (database_url, is_development, preview_origin_regex,
-                                      parse_s3_url, parse_smtp_url)
+from services.app_runtime.env import (database_url, extra_frontend_origins, is_development,
+                                      parse_s3_url, parse_smtp_url, preview_origin_regex)
 
 load_dotenv()
 
@@ -102,9 +102,11 @@ def create_app():
     # (company addresses /entity/<shortid>/<name>, blueprints/shared/entity_ref.py).
     entity_ref.init_app(app)
     # Preview sets (blueprints/shared/preview_origin.py): refuse to boot on a loose
-    # PREVIEW_ORIGIN_REGEX, and remember ?return_origin= FIRST - before the expired-session
-    # redirect, the Terms gate and login_required send the person anywhere.
+    # PREVIEW_ORIGIN_REGEX or a malformed EXTRA_FRONTEND_ORIGINS, and remember ?return_origin=
+    # FIRST - before the expired-session redirect, the Terms gate and login_required send the
+    # person anywhere.
     preview_origin_regex()
+    extra_frontend_origins()
     app.before_request(preview_origin.capture)
     # Next, the request's trace (minty_shared.logctx): before every hook that logs or binds.
     app.before_request(http_hardening.open_trace)

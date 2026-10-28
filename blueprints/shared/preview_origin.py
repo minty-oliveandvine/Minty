@@ -34,6 +34,15 @@ person's session in a set and route the tokens of later Flask-started hand-offs 
 (security review, 2026-10-13). A browser that sends no fetch metadata never names a set.
 
 CORS never reads the session: it answers the request's own ``Origin`` (:func:`cors_origin`).
+
+The ALTERNATE SET (``EXTRA_FRONTEND_ORIGINS``, ``services.app_runtime.env.extra_frontend_origins``)
+is one more set, listed origin by origin instead of by pattern: a second copy of the front ends
+on other hosts (the Cloudflare trial's ``*.workers.dev`` Workers, built from ``main``). It rides
+the same session key under the slug ``ALT_SLUG`` and the same TTL. Unlike a branch preview it
+may be named from ANY trip, cross-site included (a workers.dev page is never same-site with
+dailyminty.com): its hosts are exact, ours, and run the same code as production - the same
+trust as a configured origin, which any trip may name. An app it does not list keeps its
+configured origin; unset, a stored alternate set is ignored at once.
 """
 
 from __future__ import annotations
@@ -43,9 +52,11 @@ import time
 
 from flask import has_request_context, request, session
 
-from services.app_runtime.env import preview_origin_regex
+from services.app_runtime.env import extra_frontend_origins, preview_origin_regex
 
 SESSION_KEY = "preview_set"
+#: The stored slug of the alternate set. ``~`` is never in a branch slug.
+ALT_SLUG = "~alt"
 #: How long a named set lasts; every same-site trip from a set host names it again.
 SET_TTL_SECONDS = 30 * 60
 
@@ -85,6 +96,8 @@ def _named() -> str | None:
         origin = raw.strip().rstrip("/")
         if origin in _configured_origins():
             return ""
+        if origin in extra_frontend_origins().values():
+            return ALT_SLUG
         parsed = parse(origin)
         if parsed and fetch_site in ("same-site", "same-origin"):
             return parsed[0]
@@ -113,6 +126,8 @@ def handoff_origin(app: str, configured: str) -> str:
         stored = session.get(SESSION_KEY)
         fresh = isinstance(stored, dict) and time.time() - stored.get("at", 0) < SET_TTL_SECONDS
         slug = stored.get("slug") if fresh else None
+    if slug == ALT_SLUG:
+        return extra_frontend_origins().get(app, configured)
     if slug:
         candidate = set_origin(slug, app)
         if parse(candidate) == (slug, app):
@@ -122,14 +137,15 @@ def handoff_origin(app: str, configured: str) -> str:
 
 def cors_origin(configured: tuple[str, ...], apps: tuple[str, ...]) -> str:
     """The ``Access-Control-Allow-Origin`` to answer: the request's ``Origin`` when it is one
-    of ``configured`` or a set origin for one of ``apps``, otherwise ``configured[0]`` (which
-    the browser refuses for any other caller)."""
+    of ``configured``, an extra origin of one of ``apps`` or a set origin for one of them,
+    otherwise ``configured[0]`` (which the browser refuses for any other caller)."""
     origin = (request.headers.get("Origin") or "").rstrip("/")
-    if origin in configured:
+    extra = extra_frontend_origins()
+    if origin in configured or origin in {extra[a] for a in apps if a in extra}:
         return origin
     parsed = parse(origin)
     return origin if parsed and parsed[1] in apps else configured[0]
 
 
 def is_set_origin(origin: str) -> bool:
-    return parse(origin) is not None
+    return parse(origin) is not None or origin in extra_frontend_origins().values()
