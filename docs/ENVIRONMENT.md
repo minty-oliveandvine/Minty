@@ -400,10 +400,10 @@ And:
 - **Migrations are deliberate.** Hosted services run with `RUN_MIGRATIONS=false` (set by
   `minty-infra`; the image's own default is still `true`, so a service outside Terraform would
   migrate on start).
-  The schema moves only through Minty's manual **migrate** workflow
-  (`.github/workflows/migrate.yml`: `current` to look, `upgrade` to apply; production from
-  `main` behind the `production-db` environment). Run it **before** merging code that needs
-  the new columns.
+  Since 2026-10-30 the schema moves only through **minty-db** (`python -m minty_db migrate`,
+  run by hand per database; Supabase only with the owner's yes). Alembic is frozen
+  (`migrations/README`, `tests/test_zz_alembic_frozen.py`) and the `migrate.yml` workflow is
+  gone. Migrate **before** merging code that needs the new columns.
 - **Health checks:** Petty Cash `/health`, subscription API `/healthz`, payment-request API
   `/healthz`, onboarding API `/health` — liveness only, no database.
 - **Docker** (`docker/Dockerfile`) starts gunicorn like the `Procfile`: 2 workers

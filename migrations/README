@@ -1,1 +1,12 @@
+FROZEN (owner, 2026-10-30). Alembic no longer changes the schema: every schema change is a
+minty-db migration (github.com/minty-oliveandvine/minty-db; python -m minty_db migrate).
+
+This chain stays, read-only, for one job: scripts/schema_migration/rehearse.py lifts an old
+pettycashv2 production dump to head with it before loading the v3 schema (the local
+pettycashv3_data builds), and docker/docker-compose.yml's local stack builds its database with it.
+Nothing runs it against a hosted database (the migrate.yml workflow is gone).
+tests/test_zz_alembic_frozen.py fails if any file here is added, changed or removed.
+
+-----
+
 Single-database configuration for Flask.

@@ -65,7 +65,6 @@ The design, and the four corrections the survey of 2026-10-07 forced on it, are 
 |---|---|---|
 | `ci.yml` | `push` to `main`/`development`, every PR | calls `flask-app.yml`: `pytest -n auto` on a Postgres built from `docs/schema/01_schema_rebased.sql` |
 | `e2e.yml` | **manual**, plus Sundays 19:00 UTC | calls `stack-e2e.yml`: the whole seven-service stack, then one repo's Playwright specs |
-| `migrate.yml` | **manual** only | `flask db current` / `flask db upgrade` against a chosen environment |
 
 **Branch preview sets** are the frontends' business, not Minty's: each of the four Next.js repos
 has a `preview.yml` calling the `.github` repo's `vercel-preview-set.yml` (minty-infra `CUTOVER.md`
